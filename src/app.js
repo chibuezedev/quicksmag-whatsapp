@@ -50,7 +50,7 @@ app.post("/webhook/whatsapp", (req, res) => {
 
 app.get("/", (req, res) => {
   res.json({
-    status: "FoodBot API is running",
+    status: "Quicksmag Whatsapp API!!",
     timestamp: new Date().toISOString(),
   });
 });
