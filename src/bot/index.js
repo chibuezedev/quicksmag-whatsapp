@@ -690,7 +690,6 @@ Please provide your delivery address:
 
     await order.save();
 
-    // Clear cart and reset session
     userSession.cart = [];
     userSession.currentStep = "initial";
     await userSession.save();
