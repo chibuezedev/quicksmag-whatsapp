@@ -1,0 +1,24 @@
+{
+  "name": "quicksmag-whatsapp-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp Food Ordering Bot",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "tsx watch src/app.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "moment": "^2.29.4",
+    "mongoose": "^7.5.0",
+    "node-cron": "^3.0.2",
+    "qrcode-terminal": "^0.12.0",
+    "tsx": "^4.20.3",
+    "whatsapp-web.js": "^1.21.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
