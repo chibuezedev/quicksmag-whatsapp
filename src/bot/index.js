@@ -54,7 +54,6 @@ class WhatsAppBusinessBot {
     }
   }
 
-  // Helper method to extract message text and handle interactive responses
   extractMessageContent(message) {
     let messageText = "";
     let isInteractive = false;
@@ -68,7 +67,7 @@ class WhatsAppBusinessBot {
           .toLowerCase()
           .trim();
       } else if (message.interactive.type === "list_reply") {
-        messageText = message.interactive.list_reply.id; // Use the ID, not title
+        messageText = message.interactive.list_reply.id;
       }
     }
 
@@ -143,7 +142,6 @@ class WhatsAppBusinessBot {
     }
   }
 
-  // Send message using Business API
   async sendMessage(to, text) {
     try {
       const response = await axios.post(
@@ -171,7 +169,6 @@ class WhatsAppBusinessBot {
     }
   }
 
-  // Send interactive button message
   async sendButtonMessage(to, text, buttons) {
     try {
       const response = await axios.post(
@@ -211,23 +208,20 @@ class WhatsAppBusinessBot {
     }
   }
 
-  // Helper function to truncate text to fit WhatsApp limits
   truncateText(text, maxLength) {
     if (text.length <= maxLength) return text;
     return text.substring(0, maxLength - 3) + "...";
   }
 
-  // Send list message with proper length validation
   async sendListMessage(to, text, sections) {
     try {
-      // Validate and truncate section titles and descriptions
       const processedSections = sections.map((section) => ({
         ...section,
-        title: this.truncateText(section.title, 24), // Max 24 chars for section title
+        title: this.truncateText(section.title, 24),
         rows: section.rows.map((row) => ({
           ...row,
-          title: this.truncateText(row.title, 24), // Max 24 chars for row title
-          description: this.truncateText(row.description || "", 72), // Max 72 chars for description
+          title: this.truncateText(row.title, 24),
+          description: this.truncateText(row.description || "", 72),
         })),
       }));
 
@@ -281,7 +275,6 @@ What would you like to eat today? You can:
 
 Just tell me what you're craving! 😋`;
 
-    // Handle button responses
     if (isInteractive) {
       if (messageText === "browse menu") {
         await this.showCategories(phoneNumber, userSession);
@@ -295,7 +288,6 @@ Just tell me what you're craving! 😋`;
       }
     }
 
-    // Handle text messages (case insensitive)
     if (messageText === "menu") {
       await this.showCategories(phoneNumber, userSession);
     } else if (messageText === "cart") {
@@ -329,7 +321,7 @@ Just tell me what you're craving! 😋`;
 
     const sections = [
       {
-        title: "Categories", // Shortened to fit 24 char limit
+        title: "Categories",
         rows: categories.map((category, index) => ({
           id: `cat_${category._id}`,
           title: this.truncateText(category.name, 24),
@@ -374,15 +366,14 @@ Just tell me what you're craving! 😋`;
       return;
     }
 
-    // Create a shorter title that fits the 24 character limit
-    let sectionTitle = `${foods.length} Results`; // Default short title
+    let sectionTitle = `${foods.length} Results`;
     if (query.length <= 12) {
-      sectionTitle = `${foods.length} ${query} items`; // Only if query is short enough
+      sectionTitle = `${foods.length} ${query} items`;
     }
 
     const sections = [
       {
-        title: this.truncateText(sectionTitle, 24), // Ensure it fits
+        title: this.truncateText(sectionTitle, 24),
         rows: foods.map((food, index) => ({
           id: `food_${food._id}`,
           title: this.truncateText(`${food.name} - ₦${food.price}`, 24),
@@ -406,21 +397,18 @@ Just tell me what you're craving! 😋`;
   }
 
   async handleFoodSelection(phoneNumber, userSession, messageText) {
-    // Handle list/button responses
     if (messageText.startsWith("food_")) {
       const foodId = messageText.replace("food_", "");
       await this.showFoodDetails(phoneNumber, userSession, foodId);
       return;
     }
 
-    // Handle category selection
     if (messageText.startsWith("cat_")) {
       const categoryId = messageText.replace("cat_", "");
       await this.showFoodsByCategory(phoneNumber, userSession, categoryId);
       return;
     }
 
-    // Handle text input as new search
     if (messageText.length > 2) {
       userSession.searchQuery = messageText;
       userSession.currentStep = "searching";
@@ -544,7 +532,6 @@ How many would you like to add to your cart?`;
       return;
     }
 
-    // Add to cart logic
     const cartItem = {
       food: userSession.selectedFood,
       quantity: quantity,
@@ -595,7 +582,6 @@ How many would you like to add to your cart?`;
       userSession.currentStep = "initial";
       await userSession.save();
     } else {
-      // Treat as new search
       userSession.searchQuery = messageText;
       userSession.currentStep = "searching";
       await userSession.save();
@@ -746,7 +732,6 @@ Need assistance? Just ask! 😊`;
     await this.sendMessage(phoneNumber, helpMessage);
   }
 
-  // Method to send order updates
   async sendOrderUpdate(phoneNumber, message) {
     await this.sendMessage(phoneNumber, message);
   }

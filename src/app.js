@@ -317,7 +317,6 @@ app.get("/api/analytics/dashboard", async (req, res) => {
   }
 });
 
-// User Session Management
 app.get("/api/sessions", async (req, res) => {
   try {
     const sessions = await UserSession.find()
@@ -352,7 +351,6 @@ app.use((error, req, res, next) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-// 404 handler
 app.use("*", (req, res) => {
   res.status(404).json({ error: "Route not found" });
 });
