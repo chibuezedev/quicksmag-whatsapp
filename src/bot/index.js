@@ -1,14 +1,12 @@
 const express = require("express");
 const axios = require("axios");
-const {
-  FoodItem,
-  Restaurant,
-  UserSession,
-  Order,
-  Category,
-} = require("../models");
 
-class WhatsAppBusinessBot {
+const FoodItem = require("../models/food");
+const UserSession = require("../models/user");
+const Order = require("../models/order");
+const Category = require("../models/category");
+
+class Bot {
   constructor() {
     this.accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
     this.phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
@@ -261,12 +259,12 @@ class WhatsAppBusinessBot {
     messageText,
     isInteractive
   ) {
-    const welcomeMessage = `🍽️ Welcome to FoodBot! 🤖
+    const welcomeMessage = `🍽️ Welcome to QuickSmag! 🤖
 
-I can help you order delicious food from various restaurants.
+I can help you order delicious food from various restaurants around Awka.
 
 What would you like to eat today? You can:
-• Type a food name (e.g., "pizza", "burger", "pasta")
+• Type a food name (e.g., "pizza", "burger", "pasta", "Egusi", "Rice)
 • Browse by category
 • Check your cart
 • Get help
@@ -286,11 +284,11 @@ Just tell me what you're craving! 😋`;
       }
     }
 
-    if (messageText === "menu") {
+    if (messageText.toLowerCase().trim() === "menu") {
       await this.showCategories(phoneNumber, userSession);
-    } else if (messageText === "cart") {
+    } else if (messageText.toLowerCase().trim() === "cart") {
       await this.showCart(phoneNumber, userSession);
-    } else if (messageText === "help") {
+    } else if (messageText.toLowerCase().trim() === "help") {
       await this.showHelp(phoneNumber);
     } else if (messageText.length > 2) {
       userSession.searchQuery = messageText;
@@ -339,12 +337,8 @@ Just tell me what you're craving! 😋`;
   }
 
   async searchFood(phoneNumber, userSession, query) {
-    console.log("Searching for:", query);
-
-    // Enhanced case-insensitive search with trimmed and normalized query
     const normalizedQuery = query.toLowerCase().trim();
 
-    // First, search for matching categories
     const matchingCategories = await Category.find({
       $and: [
         { isActive: true },
@@ -352,9 +346,6 @@ Just tell me what you're craving! 😋`;
       ],
     });
 
-    console.log("Matching categories:", matchingCategories.length);
-
-    // Search for foods by name, description, tags, and category
     const foods = await FoodItem.find({
       $and: [
         { isAvailable: true },
@@ -363,7 +354,6 @@ Just tell me what you're craving! 😋`;
             { name: { $regex: normalizedQuery, $options: "i" } },
             { description: { $regex: normalizedQuery, $options: "i" } },
             { tags: { $in: [new RegExp(normalizedQuery, "i")] } },
-            // Also search by category name
             ...(matchingCategories.length > 0
               ? [
                   {
@@ -379,8 +369,6 @@ Just tell me what you're craving! 😋`;
       .populate("category")
       .limit(15);
 
-    console.log("Search results count:", foods.length);
-
     if (foods.length === 0) {
       await this.sendMessage(
         phoneNumber,
@@ -393,7 +381,6 @@ Just tell me what you're craving! 😋`;
       return;
     }
 
-    // Group results by category if we found category matches
     const sections = [];
 
     if (matchingCategories.length > 0) {
@@ -422,7 +409,6 @@ Just tell me what you're craving! 😋`;
         }
       });
 
-      // Add other matching foods that don't belong to the matched categories
       const otherFoods = foods.filter(
         (food) =>
           !matchingCategories.some(
@@ -446,7 +432,6 @@ Just tell me what you're craving! 😋`;
         });
       }
     } else {
-      // No category matches, show all results in one section
       let sectionTitle = `${foods.length} Results`;
       if (query.length <= 12) {
         sectionTitle = `${foods.length} ${query} items`;
@@ -474,11 +459,6 @@ Just tell me what you're craving! 😋`;
 
     userSession.currentStep = "viewing_options";
     userSession.searchResults = foods.map((f) => f._id);
-    console.log(
-      "Updated searchResults:",
-      userSession.searchResults.length,
-      "items"
-    );
     await userSession.save();
   }
 
@@ -559,12 +539,9 @@ Just tell me what you're craving! 😋`;
   }
 
   async showFoodDetails(phoneNumber, userSession, foodId) {
-    console.log("Showing food details for ID:", foodId);
-
     const food = await FoodItem.findById(foodId).populate("restaurant");
 
     if (!food) {
-      console.log("Food not found for ID:", foodId);
       await this.sendMessage(
         phoneNumber,
         "Sorry, that item is no longer available."
@@ -573,8 +550,6 @@ Just tell me what you're craving! 😋`;
       await userSession.save();
       return;
     }
-
-    console.log("Found food:", food.name);
 
     const foodDetails = `🍽️ *${food.name}*
 📍 ${food.restaurant.name}
@@ -604,8 +579,6 @@ How many would you like to add to your cart?`;
 
   async handleQuantitySelection(phoneNumber, userSession, messageText) {
     let quantity;
-    console.log("Handling quantity selection:", messageText);
-    console.log("User session:", userSession);
 
     if (messageText === "custom amount") {
       await this.sendMessage(
@@ -690,8 +663,6 @@ How many would you like to add to your cart?`;
   }
 
   async handleCartManagement(phoneNumber, userSession, messageText) {
-    console.log("Cart management - received:", messageText);
-
     if (messageText === "view cart" || messageText === "cart") {
       await this.showCart(phoneNumber, userSession);
     } else if (messageText === "checkout") {
@@ -710,7 +681,6 @@ How many would you like to add to your cart?`;
       userSession.currentStep = "initial";
       await userSession.save();
     } else {
-      // User is searching for new items
       userSession.searchQuery = messageText;
       userSession.currentStep = "searching";
       await userSession.save();
@@ -730,7 +700,6 @@ How many would you like to add to your cart?`;
     }
 
     try {
-      // Properly populate cart items with food details
       const cartItems = await Promise.all(
         userSession.cart.map(async (item) => {
           const food = await FoodItem.findById(item.food).populate(
@@ -741,13 +710,12 @@ How many would you like to add to your cart?`;
             return null;
           }
           return {
-            ...(item._doc || item), // Handle both document and plain object
+            ...(item._doc || item),
             foodDetails: food,
           };
         })
       );
 
-      // Filter out null items (deleted food items)
       const validCartItems = cartItems.filter((item) => item !== null);
 
       if (validCartItems.length === 0) {
@@ -825,7 +793,6 @@ Please provide your delivery address:
     }
 
     try {
-      // Create order
       const orderNumber = "ORD" + Date.now();
       const cartItems = await Promise.all(
         userSession.cart.map(async (item) => {
@@ -859,22 +826,22 @@ Please provide your delivery address:
 
       await order.save();
 
-      // Clear cart and reset session
       userSession.cart = [];
       userSession.currentStep = "initial";
       await userSession.save();
 
       const confirmationMessage = `✅ *Order Confirmed!*
 
-📋 Order #: ${orderNumber}
-💰 Total: ₦${totalAmount}
-📍 Delivery to: ${address}
-⏱️ Estimated delivery: 45-60 minutes
+    📋 Order #: ${orderNumber}
+    💰 Total: ₦${totalAmount}
+    🚚 Delivery Fee: ₦0 (Free delivery)
+    📍 Delivery to: ${address}
+    ⏱️ Estimated delivery: 45-60 minutes
 
-Payment: Cash on delivery
-You'll receive updates on your order status.
+    Payment: Cash or Transfer on delivery
+    You'll receive updates on your order status from our Merchandise.
 
-Thank you for your order! 🙏`;
+    Thank you for your order! 🙏`;
 
       await this.sendMessage(phoneNumber, confirmationMessage);
     } catch (error) {
@@ -887,7 +854,7 @@ Thank you for your order! 🙏`;
   }
 
   async showHelp(phoneNumber) {
-    const helpMessage = `🤖 *FoodBot Help*
+    const helpMessage = `🤖 *QuickSmag Help*
 
 *How to order:*
 1. Tell me what food you want
@@ -913,4 +880,4 @@ Need assistance? Just ask! 😊`;
   }
 }
 
-module.exports = WhatsAppBusinessBot;
+module.exports = Bot;
