@@ -19,7 +19,11 @@ const foodItemSchema = new mongoose.Schema(
     name: { type: String, required: true },
     description: String,
     price: { type: Number, required: true },
-    category: { type: String, required: true },
+    category: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Category",
+      required: true,
+    },
     restaurant: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Restaurant",
@@ -75,6 +79,8 @@ const userSessionSchema = new mongoose.Schema(
     currentStep: { type: String, default: "initial" },
     searchQuery: String,
     selectedCategory: String,
+    selectedFood: { type: mongoose.Schema.Types.ObjectId, ref: "FoodItem" },
+    searchResults: [{ type: mongoose.Schema.Types.ObjectId, ref: "FoodItem" }],
     cart: [
       {
         food: { type: mongoose.Schema.Types.ObjectId, ref: "FoodItem" },
