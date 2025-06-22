@@ -88,11 +88,9 @@ class WhatsAppBusinessBot {
         await userSession.save();
       }
 
-      // Update last activity
       userSession.lastActivity = new Date();
       await userSession.save();
 
-      // Route message based on current step
       switch (userSession.currentStep) {
         case "initial":
           await this.handleInitialMessage(
