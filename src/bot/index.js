@@ -781,77 +781,105 @@ Please provide your delivery address:
     await userSession.save();
   }
 
-  async handleCheckout(phoneNumber, userSession, messageText) {
-    const address = messageText.trim();
+ async handleCheckout(phoneNumber, userSession, messageText) {
+  const address = messageText.trim();
 
-    if (address.length < 10) {
-      await this.sendMessage(
-        phoneNumber,
-        "Please provide a more detailed delivery address."
-      );
-      return;
-    }
-
-    try {
-      const orderNumber = "ORD" + Date.now();
-      const cartItems = await Promise.all(
-        userSession.cart.map(async (item) => {
-          const food = await FoodItem.findById(item.food);
-          if (!food) {
-            throw new Error(`Food item ${item.food} not found`);
-          }
-          return {
-            food: item.food,
-            quantity: item.quantity,
-            price: food.price,
-          };
-        })
-      );
-
-      const totalAmount = cartItems.reduce(
-        (sum, item) => sum + item.price * item.quantity,
-        0
-      );
-
-      const order = new Order({
-        orderNumber,
-        customerPhone: userSession.phoneNumber,
-        items: cartItems,
-        totalAmount,
-        deliveryAddress: address,
-        restaurant: cartItems[0]
-          ? (await FoodItem.findById(cartItems[0].food)).restaurant
-          : null,
-      });
-
-      await order.save();
-
-      userSession.cart = [];
-      userSession.currentStep = "initial";
-      await userSession.save();
-
-      const confirmationMessage = `✅ *Order Confirmed!*
-
-    📋 Order #: ${orderNumber}
-    💰 Total: ₦${totalAmount}
-    🚚 Delivery Fee: ₦0 (Free delivery)
-    📍 Delivery to: ${address}
-    ⏱️ Estimated delivery: 45-60 minutes
-
-    Payment: Cash or Transfer on delivery
-    You'll receive updates on your order status from our Merchandise.
-
-    Thank you for your order! 🙏`;
-
-      await this.sendMessage(phoneNumber, confirmationMessage);
-    } catch (error) {
-      console.error("Error during checkout:", error);
-      await this.sendMessage(
-        phoneNumber,
-        "Sorry, there was an error processing your order. Please try again or contact support."
-      );
-    }
+  if (address.length < 10) {
+    await this.sendMessage(
+      phoneNumber,
+      "Please provide a more detailed delivery address."
+    );
+    return;
   }
+
+  try {
+    const orderNumber = "ORD" + Date.now();
+    
+    const cartItems = await Promise.all(
+      userSession.cart.map(async (item) => {
+        const food = await FoodItem.findById(item.food);
+        if (!food) {
+          throw new Error(`Food item ${item.food} not found`);
+        }
+        return {
+          food: item.food,
+          quantity: item.quantity,
+          price: food.price,
+          name: food.name,
+          specialInstructions: item.specialInstructions || null,
+        };
+      })
+    );
+
+    const totalAmount = cartItems.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0
+    );
+
+    const order = new Order({
+      orderNumber,
+      customerPhone: userSession.phoneNumber,
+      items: cartItems.map(item => ({
+        food: item.food,
+        quantity: item.quantity,
+        price: item.price,
+        specialInstructions: item.specialInstructions,
+      })),
+      totalAmount,
+      deliveryAddress: address,
+      restaurant: cartItems[0]
+        ? (await FoodItem.findById(cartItems[0].food)).restaurant
+        : null,
+    });
+
+    await order.save();
+
+    const orderItemsText = cartItems.map((item) => {
+      const itemTotal = item.price * item.quantity;
+      let itemText = `• ${item.name} x${item.quantity} - ₦${itemTotal}`;
+      
+      if (item.specialInstructions) {
+        itemText += `\n  (${item.specialInstructions})`;
+      }
+      
+      return itemText;
+    }).join('\n');
+
+    userSession.cart = [];
+    userSession.currentStep = "initial";
+    await userSession.save();
+
+    const confirmationMessage = `✅ *Order Confirmed!*
+
+📋 *Order #:* ${orderNumber}
+
+🍽️ *Your Order:*
+${orderItemsText}
+
+💰 *Subtotal:* ₦${totalAmount}
+🚚 *Delivery Fee:* ₦0 (Free delivery)
+💳 *Total Amount:* ₦${totalAmount}
+
+📍 *Delivery Address:*
+${address}
+
+⏱️ *Estimated Delivery:* 45-60 minutes
+💵 *Payment:* Cash or Transfer on delivery
+
+You'll receive updates on your order status from our team.
+
+Thank you for your order! 🙏`;
+
+    await this.sendMessage(phoneNumber, confirmationMessage);
+    
+  } catch (error) {
+    console.error("Error during checkout:", error);
+    await this.sendMessage(
+      phoneNumber,
+      "Sorry, there was an error processing your order. Please try again or contact support."
+    );
+  }
+}
 
   async showHelp(phoneNumber) {
     const helpMessage = `🤖 *QuickSmag Help*
