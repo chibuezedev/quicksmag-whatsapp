@@ -6,6 +6,7 @@ const cron = require("node-cron");
 
 const Bot = require("./bot");
 const Routes = require("./routes/main");
+const connectDB = require("./db")
 
 const UserSession = require("./models/user");
 
@@ -17,16 +18,15 @@ app.use(express.json());
 
 let whatsappBot;
 
-mongoose
-  .connect(process.env.MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => {
-    console.log("Connected to MongoDB");
+(async () => {
+  try {
+    await connectDB();
     whatsappBot = new Bot();
-  })
-  .catch((error) => console.error("MongoDB connection error:", error));
+    console.log("Connected to Database!!")
+  } catch (error) {
+    console.error("Failed to start server:", error);
+  }
+})();
 
 app.get("/webhook/whatsapp", (req, res) => {
   if (whatsappBot) {
