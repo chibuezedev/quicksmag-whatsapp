@@ -1,15 +1,12 @@
-const User = require("../models/users");
 const jwt = require("jsonwebtoken");
+require("dotenv").config();
+
+const User = require("../models/users");
 
 const generateToken = (userId) => {
-  return jwt.sign(
-    { userId },
-    process.env.JWT_SECRET ||
-      "1b1c32a7c26686ed4fa7b9b9e871e9e0dda9e389db2045e2f0a8b098ed6ede33",
-    {
-      expiresIn: "7d",
-    }
-  );
+  return jwt.sign({ userId }, process.env.JWT_SECRET, {
+    expiresIn: "7d",
+  });
 };
 
 const authController = {
