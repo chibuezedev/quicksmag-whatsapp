@@ -4,6 +4,8 @@ const restaurantController = require("../controllers/restaurant");
 
 router.get("/", restaurantController.getAllRestaurants);
 
+router.get("/:id", restaurantController.getARestaurant);
+
 router.post("/", restaurantController.createRestaurant);
 
 router.put("/:id", restaurantController.updateRestaurant);

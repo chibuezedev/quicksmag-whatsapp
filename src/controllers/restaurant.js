@@ -4,8 +4,21 @@ const FoodItem = require("../models/food");
 const restaurantController = {
   getAllRestaurants: async (req, res) => {
     try {
-      const restaurants = await Restaurant.find().sort({ createdAt: -1 });
+      const restaurants = await Restaurant.find()
+        .sort({ createdAt: -1 })
+        .populate("owner");
       res.json(restaurants);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  },
+
+  getARestaurant: async (req, res) => {
+    try {
+      const restaurant = await Restaurant.findById(req.params.id).populate(
+        "owner"
+      );
+      res.json(restaurant);
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
