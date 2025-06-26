@@ -6,7 +6,7 @@ const cron = require("node-cron");
 
 const Bot = require("./bot");
 const Routes = require("./routes/main");
-const connectDB = require("./db")
+const connectDB = require("./db");
 
 const UserSession = require("./models/user");
 
@@ -22,7 +22,10 @@ let whatsappBot;
   try {
     await connectDB();
     whatsappBot = new Bot();
-    console.log("Connected to Database!!")
+    console.log("Connected to Database!!");
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
   } catch (error) {
     console.error("Failed to start server:", error);
   }
@@ -78,8 +81,4 @@ cron.schedule("0 * * * *", async () => {
   } catch (error) {
     console.error("Error cleaning up sessions:", error);
   }
-});
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
 });
