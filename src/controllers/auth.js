@@ -67,7 +67,7 @@ const authController = {
           id: user._id,
           email: user.email,
           role: user.role,
-          restaurantId: user.restaurantId,
+          restaurantId: user.restaurant,
         },
         token,
       });
