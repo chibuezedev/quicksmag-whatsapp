@@ -36,6 +36,7 @@ class Bot {
       checkout: ["checkout", "order", "pay", "confirm order", "place order"],
       search: ["search", "find", "looking for", "want", "need"],
       cancel: ["cancel", "stop", "quit", "exit", "clear"],
+      reset: ["reset", "restart", "start over", "begin again"],
       yes: ["yes", "yeah", "yep", "ok", "okay", "sure", "correct"],
       no: ["no", "nope", "cancel", "back"],
     };
@@ -219,6 +220,7 @@ class Bot {
           phoneNumber,
           userName: userName,
           isFirstVisit: true,
+          contactData: contact,
         });
         await userSession.save();
       }
@@ -368,6 +370,17 @@ What would you like to do today? 😋`;
   }
 
   async handleInitialStep(phoneNumber, userSession, messageText, intent) {
+    if (intent === "reset") {
+      await this.sendMessage(phoneNumber, "🔄 Starting over...");
+      userSession.currentStep = "initial";
+      userSession.cart = userSession.cart || [];
+      userSession.selectedFood = null;
+      userSession.searchQuery = null;
+      userSession.searchResults = [];
+      await userSession.save();
+      await this.sendGreetingResponse(phoneNumber, userSession);
+      return;
+    }
     switch (intent) {
       case "greeting":
         await this.sendGreetingResponse(phoneNumber, userSession);
@@ -394,6 +407,20 @@ What would you like to do today? 😋`;
   }
 
   async handleInteractiveResponse(phoneNumber, userSession, messageText) {
+    if (messageText.startsWith("food_")) {
+      const foodId = messageText.replace("food_", "");
+      console.log("Food selected:", foodId);
+      await this.showFoodDetails(phoneNumber, userSession, foodId);
+      return;
+    }
+
+    if (messageText.startsWith("cat_")) {
+      const categoryId = messageText.replace("cat_", "");
+      console.log("Category selected:", categoryId);
+      await this.showFoodsByCategory(phoneNumber, userSession, categoryId);
+      return;
+    }
+
     if (messageText === "browse menu") {
       await this.showCategories(phoneNumber, userSession);
     } else if (messageText === "search food") {
@@ -429,6 +456,17 @@ What would you like to do today? 😋`;
   }
 
   async handleQuantityStep(phoneNumber, userSession, messageText, intent) {
+    if (intent === "reset") {
+      await this.sendMessage(phoneNumber, "🔄 Starting over...");
+      userSession.currentStep = "initial";
+      userSession.cart = userSession.cart || [];
+      userSession.selectedFood = null;
+      userSession.searchQuery = null;
+      userSession.searchResults = [];
+      await userSession.save();
+      await this.sendGreetingResponse(phoneNumber, userSession);
+      return;
+    }
     if (intent === "cancel") {
       await this.sendMessage(
         phoneNumber,
@@ -460,6 +498,17 @@ What would you like to do today? 😋`;
   }
 
   async handleCheckoutStep(phoneNumber, userSession, messageText, intent) {
+    if (intent === "reset") {
+      await this.sendMessage(phoneNumber, "🔄 Starting over...");
+      userSession.currentStep = "initial";
+      userSession.cart = userSession.cart || [];
+      userSession.selectedFood = null;
+      userSession.searchQuery = null;
+      userSession.searchResults = [];
+      await userSession.save();
+      await this.sendGreetingResponse(phoneNumber, userSession);
+      return;
+    }
     if (intent === "cancel") {
       await this.sendMessage(
         phoneNumber,
@@ -815,7 +864,27 @@ Try searching for:
     const intent = this.detectIntent(messageText);
     console.log("Intent detected in food selection:", intent);
 
-    if (intent === "food_search" || intent === "unknown") {
+    if (intent === "greeting") {
+      await this.sendGreetingResponse(phoneNumber, userSession);
+      return;
+    }
+
+    if (intent === "menu") {
+      await this.showCategories(phoneNumber, userSession);
+      return;
+    }
+
+    if (intent === "cart") {
+      await this.showCart(phoneNumber, userSession);
+      return;
+    }
+
+    if (intent === "help") {
+      await this.showHelp(phoneNumber);
+      return;
+    }
+
+    if (intent === "food_search" || intent === "search") {
       userSession.searchQuery = messageText;
       userSession.currentStep = "searching";
       await userSession.save();
@@ -823,10 +892,14 @@ Try searching for:
       return;
     }
 
-    await this.sendMessage(
+    await this.sendButtonMessage(
       phoneNumber,
-      "Please select a food item from the list above, or search for something new."
+      "I'm not sure what you're looking for. Please select a food item from the list above, or choose an option below:",
+      ["Browse Menu", "Search Food", "View Cart"]
     );
+
+    userSession.currentStep = "initial";
+    await userSession.save();
   }
 
   async showFoodsByCategory(phoneNumber, userSession, categoryId) {
@@ -1003,6 +1076,17 @@ How many would you like to add to your cart?`;
   }
 
   async handleCartManagement(phoneNumber, userSession, messageText, intent) {
+    if (intent === "reset") {
+      await this.sendMessage(phoneNumber, "🔄 Starting over...");
+      userSession.currentStep = "initial";
+      userSession.cart = userSession.cart || [];
+      userSession.selectedFood = null;
+      userSession.searchQuery = null;
+      userSession.searchResults = [];
+      await userSession.save();
+      await this.sendGreetingResponse(phoneNumber, userSession);
+      return;
+    }
     switch (intent) {
       case "cart":
         await this.showCart(phoneNumber, userSession);
