@@ -17,6 +17,7 @@ const foodController = {
 
       const foods = await FoodItem.find(query)
         .populate("restaurant")
+        .populate("category")
         .sort({ createdAt: -1 });
       res.json(foods);
     } catch (error) {
