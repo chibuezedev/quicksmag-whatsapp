@@ -12,33 +12,115 @@ class Bot {
     this.phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
     this.webhookSecret = process.env.WHATSAPP_WEBHOOK_SECRET;
     this.baseURL = `https://graph.facebook.com/v18.0/${this.phoneNumberId}/messages`;
+    this.webAppURL = "https://admin.quicksmag.com/";
+  }
 
-    this.intents = {
-      greeting: [
-        "hi",
-        "hello",
-        "hey",
-        "good morning",
-        "good afternoon",
-        "good evening",
-        "start",
-      ],
-      menu: [
-        "menu",
-        "browse",
-        "categories",
-        "category",
-        "show menu",
-        "what do you have",
-      ],
-      cart: ["cart", "my cart", "view cart", "show cart", "my order"],
-      help: ["help", "how", "what can you do", "commands", "guide"],
-      checkout: ["checkout", "order", "pay", "confirm order", "place order"],
-      search: ["search", "find", "looking for", "want", "need"],
-      cancel: ["cancel", "stop", "quit", "exit", "clear"],
-      yes: ["yes", "yeah", "yep", "ok", "okay", "sure", "correct"],
-      no: ["no", "nope", "cancel", "back"],
+  async sendWebAppButton(to, text, buttonText, webAppUrl) {
+    try {
+      const response = await axios.post(
+        this.baseURL,
+        {
+          messaging_product: "whatsapp",
+          to: to,
+          type: "interactive",
+          interactive: {
+            type: "cta_url",
+            body: { text: text },
+            action: {
+              name: "cta_url",
+              parameters: {
+                display_text: buttonText,
+                url: webAppUrl,
+              },
+            },
+          },
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${this.accessToken}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      return response.data;
+    } catch (error) {
+      console.error(
+        "Error sending web app button:",
+        error.response?.data || error.message
+      );
+      throw error;
+    }
+  }
+
+  async handleInitialMessage(
+    phoneNumber,
+    userSession,
+    messageText,
+    isInteractive
+  ) {
+    const welcomeMessage = `🍽️ Welcome to QuickSmag! 🤖
+
+I can help you order delicious food from various restaurants around Awka.
+
+Choose how you'd like to browse and order:`;
+
+    if (messageText.length > 2) {
+      userSession.searchQuery = messageText;
+      userSession.currentStep = "searching";
+      await userSession.save();
+      await this.searchFood(phoneNumber, userSession, messageText);
+    } else {
+      await this.sendWebAppButton(
+        phoneNumber,
+        welcomeMessage,
+        "🌐 Open Full Menu",
+        `${this.webAppURL}?phone=${phoneNumber}&token=${this.generateUserToken(
+          phoneNumber
+        )}`
+      );
+
+      await this.sendButtonMessage(phoneNumber, "Or continue with chat:", [
+        "Browse Menu",
+        "View Cart",
+        "Help",
+      ]);
+    }
+  }
+
+  generateUserToken(phoneNumber) {
+    const crypto = require("crypto");
+    const payload = {
+      phone: phoneNumber,
+      timestamp: Date.now(),
+      exp: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
     };
+
+    const token = crypto
+      .createHmac("sha256", process.env.JWT_SECRET || "fallback-secret")
+      .update(JSON.stringify(payload))
+      .digest("hex");
+
+    return Buffer.from(JSON.stringify({ ...payload, token })).toString(
+      "base64"
+    );
+  }
+
+  verifyUserToken(tokenString) {
+    try {
+      const payload = JSON.parse(Buffer.from(tokenString, "base64").toString());
+      const { phone, timestamp, exp, token } = payload;
+
+      if (Date.now() > exp) return null; // Token expired
+
+      const expectedToken = crypto
+        .createHmac("sha256", process.env.JWT_SECRET || "fallback-secret")
+        .update(JSON.stringify({ phone, timestamp, exp }))
+        .digest("hex");
+
+      return token === expectedToken ? { phone, timestamp } : null;
+    } catch (error) {
+      return null;
+    }
   }
 
   verifyWebhook(req, res) {
@@ -99,106 +181,6 @@ class Bot {
     return { messageText, isInteractive };
   }
 
-  detectIntent(messageText) {
-    const text = messageText.toLowerCase().trim();
-
-    for (const [intent, keywords] of Object.entries(this.intents)) {
-      if (
-        keywords.some((keyword) => text === keyword || text.includes(keyword))
-      ) {
-        return intent;
-      }
-    }
-
-    if (this.isFoodSearch(text)) {
-      return "food_search";
-    }
-
-    if (/^\d+$/.test(text) && parseInt(text) > 0 && parseInt(text) <= 10) {
-      return "quantity";
-    }
-
-    if (text.length > 15 && text.includes(" ")) {
-      return "address";
-    }
-
-    return "unknown";
-  }
-
-  isFoodSearch(text) {
-    const foodKeywords = [
-      "rice",
-      "pasta",
-      "pizza",
-      "burger",
-      "chicken",
-      "beef",
-      "fish",
-      "soup",
-      "stew",
-      "jollof",
-      "fried",
-      "grilled",
-      "beans",
-      "yam",
-      "plantain",
-      "egusi",
-      "okra",
-      "pepper",
-      "tomato",
-      "salad",
-      "sandwich",
-      "shawarma",
-      "suya",
-      "pounded",
-      "amala",
-      "fufu",
-      "garri",
-      "bread",
-      "cake",
-      "drink",
-    ];
-
-    return (
-      foodKeywords.some((keyword) => text.includes(keyword)) ||
-      (text.length > 2 && !this.isCommonWord(text))
-    );
-  }
-
-  isCommonWord(text) {
-    const commonWords = [
-      "the",
-      "and",
-      "or",
-      "but",
-      "in",
-      "on",
-      "at",
-      "to",
-      "for",
-      "of",
-      "with",
-      "by",
-      "from",
-      "up",
-      "about",
-      "into",
-      "through",
-      "during",
-      "before",
-      "after",
-      "above",
-      "below",
-      "between",
-      "among",
-      "is",
-      "are",
-      "was",
-      "were",
-    ];
-    return commonWords.includes(text);
-  }
-
   async processMessage(message, contact) {
     const phoneNumber = message.from;
     const { messageText, isInteractive } = this.extractMessageContent(message);
@@ -207,293 +189,62 @@ class Bot {
 
     try {
       let userSession = await UserSession.findOne({ phoneNumber });
-      let isNewUser = false;
 
       if (!userSession) {
-        isNewUser = true;
-        const userName = contact?.profile?.name || "there";
-
-        userSession = new UserSession({
-          phoneNumber,
-          userName: userName,
-          isFirstVisit: true,
-        });
+        userSession = new UserSession({ phoneNumber });
         await userSession.save();
       }
 
       userSession.lastActivity = new Date();
       await userSession.save();
-      if (isNewUser || userSession.isFirstVisit) {
-        await this.sendWelcomeMessage(phoneNumber, userSession);
-        return;
-      }
 
-      const intent = this.detectIntent(messageText);
-      console.log(`Detected intent: ${intent} for message: ${messageText}`);
-
-      await this.routeMessage(
-        phoneNumber,
-        userSession,
-        messageText,
-        intent,
-        isInteractive
-      );
-    } catch (error) {
-      console.error("Error processing message:", error);
-      await this.sendMessage(
-        phoneNumber,
-        "Sorry, something went wrong. Please try again or type 'help' for assistance."
-      );
-    }
-  }
-
-  async sendWelcomeMessage(phoneNumber, userSession) {
-    const welcomeMessage = `🍽️ Hello ${userSession.userName}! Welcome to QuickSmag! 🤖
-
-I'm your personal food ordering assistant. I can help you discover and order delicious meals from various restaurants around Awka.
-
-Here's what I can do for you:
-• 🔍 Search for specific dishes
-• 📋 Browse our menu categories  
-• 🛒 Manage your cart
-• 🚚 Process your orders
-• ❓ Provide help and guidance
-
-What would you like to do today? 😋`;
-
-    await this.sendButtonMessage(phoneNumber, welcomeMessage, [
-      "Browse Menu",
-      "Search Food",
-      "Help",
-    ]);
-
-    userSession.currentStep = "initial";
-    userSession.isFirstVisit = false;
-    await userSession.save();
-  }
-
-  async routeMessage(
-    phoneNumber,
-    userSession,
-    messageText,
-    intent,
-    isInteractive
-  ) {
-    if (isInteractive) {
-      await this.handleInteractiveResponse(
-        phoneNumber,
-        userSession,
-        messageText
-      );
-      return;
-    }
-
-    switch (userSession.currentStep) {
-      case "initial":
-        await this.handleInitialStep(
-          phoneNumber,
-          userSession,
-          messageText,
-          intent
-        );
-        break;
-      case "searching":
-        if (intent === "food_search" || intent === "unknown") {
-          await this.searchFood(phoneNumber, userSession, messageText);
-        } else {
-          await this.handleInitialStep(
+      switch (userSession.currentStep) {
+        case "initial":
+          await this.handleInitialMessage(
             phoneNumber,
             userSession,
             messageText,
-            intent
+            isInteractive
           );
-        }
-        break;
-      case "viewing_options":
-        await this.handleFoodSelection(phoneNumber, userSession, messageText);
-        break;
-      case "adding_to_cart":
-        if (intent === "quantity") {
+          break;
+        case "searching":
+          await this.searchFood(phoneNumber, userSession, messageText);
+          break;
+        case "viewing_options":
+          await this.handleFoodSelection(phoneNumber, userSession, messageText);
+          break;
+        case "adding_to_cart":
           await this.handleQuantitySelection(
             phoneNumber,
             userSession,
             messageText
           );
-        } else {
-          await this.handleQuantityStep(
+          break;
+        case "cart_management":
+          await this.handleCartManagement(
             phoneNumber,
             userSession,
-            messageText,
-            intent
+            messageText
           );
-        }
-        break;
-      case "cart_management":
-        await this.handleCartManagement(
-          phoneNumber,
-          userSession,
-          messageText,
-          intent
-        );
-        break;
-      case "checkout":
-        if (intent === "address") {
+          break;
+        case "checkout":
           await this.handleCheckout(phoneNumber, userSession, messageText);
-        } else {
-          await this.handleCheckoutStep(
+          break;
+        default:
+          await this.handleInitialMessage(
             phoneNumber,
             userSession,
             messageText,
-            intent
+            isInteractive
           );
-        }
-        break;
-      default:
-        await this.handleInitialStep(
-          phoneNumber,
-          userSession,
-          messageText,
-          intent
-        );
-    }
-  }
-
-  async handleInitialStep(phoneNumber, userSession, messageText, intent) {
-    switch (intent) {
-      case "greeting":
-        await this.sendGreetingResponse(phoneNumber, userSession);
-        break;
-      case "menu":
-        await this.showCategories(phoneNumber, userSession);
-        break;
-      case "cart":
-        await this.showCart(phoneNumber, userSession);
-        break;
-      case "help":
-        await this.showHelp(phoneNumber);
-        break;
-      case "food_search":
-        userSession.searchQuery = messageText;
-        userSession.currentStep = "searching";
-        await userSession.save();
-        await this.searchFood(phoneNumber, userSession, messageText);
-        break;
-      default:
-        await this.sendOptionsMessage(phoneNumber, userSession, messageText);
-        break;
-    }
-  }
-
-  async handleInteractiveResponse(phoneNumber, userSession, messageText) {
-    if (messageText === "browse menu") {
-      await this.showCategories(phoneNumber, userSession);
-    } else if (messageText === "search food") {
+      }
+    } catch (error) {
+      console.error("Error processing message:", error);
       await this.sendMessage(
         phoneNumber,
-        "🔍 What would you like to search for? (e.g., 'jollof rice', 'pizza', 'chicken')"
-      );
-      userSession.currentStep = "searching";
-      await userSession.save();
-    } else if (messageText === "view cart") {
-      await this.showCart(phoneNumber, userSession);
-    } else if (messageText === "help") {
-      await this.showHelp(phoneNumber);
-    } else if (messageText === "continue shopping") {
-      await this.sendMessage(
-        phoneNumber,
-        "What would you like to search for next?"
-      );
-      userSession.currentStep = "initial";
-      await userSession.save();
-    } else if (messageText === "checkout") {
-      await this.initiateCheckout(phoneNumber, userSession);
-    } else if (messageText === "clear cart") {
-      userSession.cart = [];
-      await userSession.save();
-      await this.sendMessage(
-        phoneNumber,
-        "🛒 Cart cleared! What would you like to order?"
-      );
-      userSession.currentStep = "initial";
-      await userSession.save();
-    }
-  }
-
-  async handleQuantityStep(phoneNumber, userSession, messageText, intent) {
-    if (intent === "cancel") {
-      await this.sendMessage(
-        phoneNumber,
-        "Cancelled. What would you like to do next?"
-      );
-      userSession.currentStep = "initial";
-      userSession.selectedFood = null;
-      await userSession.save();
-      return;
-    }
-
-    if (messageText === "custom amount") {
-      await this.sendMessage(
-        phoneNumber,
-        "Please enter the quantity you want (1-10):"
-      );
-      return;
-    }
-
-    const quantity = parseInt(messageText);
-    if (!isNaN(quantity) && quantity >= 1 && quantity <= 10) {
-      await this.handleQuantitySelection(phoneNumber, userSession, messageText);
-    } else {
-      await this.sendMessage(
-        phoneNumber,
-        "Please enter a valid quantity (1-10) or type 'cancel' to go back."
+        "Sorry, something went wrong. Please try again."
       );
     }
-  }
-
-  async handleCheckoutStep(phoneNumber, userSession, messageText, intent) {
-    if (intent === "cancel") {
-      await this.sendMessage(
-        phoneNumber,
-        "Checkout cancelled. What would you like to do?"
-      );
-      userSession.currentStep = "cart_management";
-      await userSession.save();
-      return;
-    }
-
-    await this.sendMessage(
-      phoneNumber,
-      "Please provide your delivery address (e.g., '123 Main Street, Victoria Island, Lagos'):"
-    );
-  }
-
-  async sendGreetingResponse(phoneNumber, userSession) {
-    const greetingMessage = `Hello again ${userSession.userName}! 👋
-
-Welcome back to QuickSmag! What can I help you with today?`;
-
-    await this.sendButtonMessage(phoneNumber, greetingMessage, [
-      "Browse Menu",
-      "View Cart",
-      "Search Food",
-    ]);
-  }
-
-  async sendOptionsMessage(phoneNumber, userSession, messageText) {
-    const optionsMessage = `I'm not sure what you're looking for. Here are some things I can help you with:
-
-• 🍽️ Browse our menu categories
-• 🔍 Search for specific food items
-• 🛒 Check your cart
-• ❓ Get help
-
-What would you like to do?`;
-
-    await this.sendButtonMessage(phoneNumber, optionsMessage, [
-      "Browse Menu",
-      "Search Food",
-      "View Cart",
-    ]);
   }
 
   async sendMessage(to, text) {
@@ -611,20 +362,71 @@ What would you like to do?`;
     }
   }
 
+  async handleInitialMessage(
+    phoneNumber,
+    userSession,
+    messageText,
+    isInteractive
+  ) {
+    const welcomeMessage = `🍽️ Welcome to QuickSmag! 🤖
+
+I can help you order delicious food from various restaurants around Awka.
+
+What would you like to eat today? You can:
+• Type a food name (e.g., "pizza", "burger", "pasta", "Egusi", "Rice)
+• Browse by category
+• Check your cart
+• Get help
+
+Just tell me what you're craving! 😋`;
+
+    if (isInteractive) {
+      if (messageText === "browse menu") {
+        await this.showCategories(phoneNumber, userSession);
+        return;
+      } else if (messageText === "view cart") {
+        await this.showCart(phoneNumber, userSession);
+        return;
+      } else if (messageText === "help") {
+        await this.showHelp(phoneNumber);
+        return;
+      }
+    }
+
+    if (messageText.toLowerCase().trim() === "menu") {
+      await this.showCategories(phoneNumber, userSession);
+    } else if (messageText.toLowerCase().trim() === "cart") {
+      await this.showCart(phoneNumber, userSession);
+    } else if (messageText.toLowerCase().trim() === "help") {
+      await this.showHelp(phoneNumber);
+    } else if (messageText.length > 2) {
+      userSession.searchQuery = messageText;
+      userSession.currentStep = "searching";
+      await userSession.save();
+      await this.searchFood(phoneNumber, userSession, messageText);
+    } else {
+      await this.sendButtonMessage(phoneNumber, welcomeMessage, [
+        "Browse Menu",
+        "View Cart",
+        "Help",
+      ]);
+    }
+  }
+
   async showCategories(phoneNumber, userSession) {
     const categories = await Category.find({ isActive: true });
 
     if (categories.length === 0) {
       await this.sendMessage(
         phoneNumber,
-        "No categories available at the moment. You can search for specific food items instead!"
+        "No categories available at the moment."
       );
       return;
     }
 
     const sections = [
       {
-        title: "Food Categories",
+        title: "Categories",
         rows: categories.map((category, index) => ({
           id: `cat_${category._id}`,
           title: this.truncateText(category.name, 24),
@@ -645,8 +447,6 @@ What would you like to do?`;
 
   async searchFood(phoneNumber, userSession, query) {
     const normalizedQuery = query.toLowerCase().trim();
-
-    await this.sendMessage(phoneNumber, `🔍 Searching for "${query}"...`);
 
     const matchingCategories = await Category.find({
       $and: [
@@ -681,20 +481,8 @@ What would you like to do?`;
     if (foods.length === 0) {
       await this.sendMessage(
         phoneNumber,
-        `😔 Sorry, I couldn't find any food matching "${query}". 
-
-Try searching for:
-• Different keywords (e.g., "rice" instead of "jollof rice")
-• Popular dishes like "pizza", "chicken", "pasta"
-• Or browse our menu categories`
+        `😔 Sorry, I couldn't find any food matching "${query}". Try searching for something else or type "menu" to browse categories.`
       );
-
-      await this.sendButtonMessage(phoneNumber, "What would you like to do?", [
-        "Browse Menu",
-        "Try Another Search",
-        "View Cart",
-      ]);
-
       userSession.currentStep = "initial";
       userSession.searchQuery = null;
       userSession.searchResults = [];
@@ -796,8 +584,7 @@ Try searching for:
       return;
     }
 
-    const intent = this.detectIntent(messageText);
-    if (intent === "food_search") {
+    if (messageText.length > 2) {
       userSession.searchQuery = messageText;
       userSession.currentStep = "searching";
       await userSession.save();
@@ -807,7 +594,7 @@ Try searching for:
 
     await this.sendMessage(
       phoneNumber,
-      "Please select a food item from the list above, or search for something new."
+      "Please select a food item or search for something new."
     );
   }
 
@@ -984,61 +771,29 @@ How many would you like to add to your cart?`;
     await userSession.save();
   }
 
-  async handleCartManagement(phoneNumber, userSession, messageText, intent) {
-    switch (intent) {
-      case "cart":
-        await this.showCart(phoneNumber, userSession);
-        break;
-      case "checkout":
-        await this.initiateCheckout(phoneNumber, userSession);
-        break;
-      case "food_search":
-        await this.sendMessage(
-          phoneNumber,
-          "🔍 What would you like to search for?"
-        );
-        userSession.currentStep = "searching";
-        userSession.searchQuery = messageText;
-        await userSession.save();
-        await this.searchFood(phoneNumber, userSession, messageText);
-        break;
-      case "cancel":
-        userSession.cart = [];
-        await userSession.save();
-        await this.sendMessage(
-          phoneNumber,
-          "🛒 Cart cleared! What would you like to order?"
-        );
-        userSession.currentStep = "initial";
-        await userSession.save();
-        break;
-      default:
-        if (messageText === "view cart" || messageText === "cart") {
-          await this.showCart(phoneNumber, userSession);
-        } else if (messageText === "checkout") {
-          await this.initiateCheckout(phoneNumber, userSession);
-        } else if (messageText === "continue shopping") {
-          await this.sendMessage(
-            phoneNumber,
-            "🔍 What would you like to search for?"
-          );
-          userSession.currentStep = "initial";
-          await userSession.save();
-        } else if (messageText === "clear cart") {
-          userSession.cart = [];
-          await userSession.save();
-          await this.sendMessage(
-            phoneNumber,
-            "🛒 Cart cleared! What would you like to order?"
-          );
-          userSession.currentStep = "initial";
-          await userSession.save();
-        } else {
-          userSession.searchQuery = messageText;
-          userSession.currentStep = "searching";
-          await userSession.save();
-          await this.searchFood(phoneNumber, userSession, messageText);
-        }
+  async handleCartManagement(phoneNumber, userSession, messageText) {
+    if (messageText === "view cart" || messageText === "cart") {
+      await this.showCart(phoneNumber, userSession);
+    } else if (messageText === "checkout") {
+      await this.initiateCheckout(phoneNumber, userSession);
+    } else if (messageText === "continue shopping") {
+      await this.sendMessage(phoneNumber, "What would you like to search for?");
+      userSession.currentStep = "initial";
+      await userSession.save();
+    } else if (messageText === "clear cart") {
+      userSession.cart = [];
+      await userSession.save();
+      await this.sendMessage(
+        phoneNumber,
+        "🛒 Cart cleared! What would you like to order?"
+      );
+      userSession.currentStep = "initial";
+      await userSession.save();
+    } else {
+      userSession.searchQuery = messageText;
+      userSession.currentStep = "searching";
+      await userSession.save();
+      await this.searchFood(phoneNumber, userSession, messageText);
     }
   }
 
@@ -1141,7 +896,7 @@ Please provide your delivery address:
     if (address.length < 10) {
       await this.sendMessage(
         phoneNumber,
-        "Please provide a more detailed delivery address (at least 10 characters)."
+        "Please provide a more detailed delivery address."
       );
       return;
     }
@@ -1173,7 +928,6 @@ Please provide your delivery address:
       const order = new Order({
         orderNumber,
         customerPhone: userSession.phoneNumber,
-        customerName: userSession.userName || "Customer",
         items: cartItems.map((item) => ({
           food: item.food,
           quantity: item.quantity,
@@ -1210,8 +964,6 @@ Please provide your delivery address:
 
 📋 *Order #:* ${orderNumber}
 
-👋 *Customer:* ${userSession.userName || "Customer"}
-
 🍽️ *Your Order:*
 ${orderItemsText}
 
@@ -1227,7 +979,7 @@ ${address}
 
 You'll receive updates on your order status from our team.
 
-Thank you for your order, ${userSession.userName || ""}! 🙏`;
+Thank you for your order! 🙏`;
 
       await this.sendMessage(phoneNumber, confirmationMessage);
     } catch (error) {
@@ -1243,19 +995,18 @@ Thank you for your order, ${userSession.userName || ""}! 🙏`;
     const helpMessage = `🤖 *QuickSmag Help*
 
 *How to order:*
-1. Tell me what food you want (e.g., "jollof rice")
+1. Tell me what food you want
 2. Choose from the results
 3. Select quantity
 4. Continue shopping or checkout
 5. Provide delivery address
 6. Confirm your order
 
-*Quick Commands:*
-• "menu" - Browse food categories
-• "cart" - View your cart
-• "checkout" - Start checkout
-• "clear" - Empty your cart
-• "help" - Show this message
+*Commands:*
+• Search food: Just type what you want
+• Browse menu: Say "menu"
+• View cart: Say "cart"
+• Get help: Say "help"
 
 Need assistance? Just ask! 😊`;
 
@@ -1264,12 +1015,6 @@ Need assistance? Just ask! 😊`;
 
   async sendOrderUpdate(phoneNumber, message) {
     await this.sendMessage(phoneNumber, message);
-  }
-
-  async cleanupInactiveSessions(hours = 24) {
-    const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
-    await UserSession.deleteMany({ lastActivity: { $lt: cutoff } });
-    console.log(`Cleaned up sessions inactive for more than ${hours} hours`);
   }
 }
 

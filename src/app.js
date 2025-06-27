@@ -73,12 +73,12 @@ app.use("*", (req, res) => {
   res.status(404).json({ error: "Route not found" });
 });
 
-// cron.schedule("0 * * * *", async () => {
-//   try {
-//     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-//     await UserSession.deleteMany({ lastActivity: { $lt: oneDayAgo } });
-//     console.log("Cleaned up old user sessions");
-//   } catch (error) {
-//     console.error("Error cleaning up sessions:", error);
-//   }
-// });
+cron.schedule("0 * * * *", async () => {
+  try {
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await UserSession.deleteMany({ lastActivity: { $lt: oneDayAgo } });
+    console.log("Cleaned up old user sessions");
+  } catch (error) {
+    console.error("Error cleaning up sessions:", error);
+  }
+});
