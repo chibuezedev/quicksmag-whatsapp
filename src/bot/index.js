@@ -93,9 +93,11 @@ class Bot {
           .trim();
       } else if (message.interactive.type === "list_reply") {
         messageText = message.interactive.list_reply.id;
+        console.log("List reply ID:", messageText);
       }
     }
 
+    console.log("Extracted message content:", { messageText, isInteractive });
     return { messageText, isInteractive };
   }
 
@@ -279,6 +281,13 @@ What would you like to do today? 😋`;
     intent,
     isInteractive
   ) {
+    console.log("Routing message:", {
+      phoneNumber,
+      messageText,
+      intent,
+      isInteractive,
+      currentStep: userSession.currentStep,
+    });
     if (isInteractive) {
       await this.handleInteractiveResponse(
         phoneNumber,
@@ -784,20 +793,29 @@ Try searching for:
   }
 
   async handleFoodSelection(phoneNumber, userSession, messageText) {
+    console.log("handleFoodSelection called with:", {
+      messageText,
+      currentStep: userSession.currentStep,
+    });
+
     if (messageText.startsWith("food_")) {
       const foodId = messageText.replace("food_", "");
+      console.log("Food selected:", foodId);
       await this.showFoodDetails(phoneNumber, userSession, foodId);
       return;
     }
 
     if (messageText.startsWith("cat_")) {
       const categoryId = messageText.replace("cat_", "");
+      console.log("Category selected:", categoryId);
       await this.showFoodsByCategory(phoneNumber, userSession, categoryId);
       return;
     }
 
     const intent = this.detectIntent(messageText);
-    if (intent === "food_search") {
+    console.log("Intent detected in food selection:", intent);
+
+    if (intent === "food_search" || intent === "unknown") {
       userSession.searchQuery = messageText;
       userSession.currentStep = "searching";
       await userSession.save();

@@ -2,6 +2,9 @@ const mongoose = require("mongoose");
 
 const userSessionSchema = new mongoose.Schema(
   {
+    userName: {
+      type: String,
+    },
     phoneNumber: {
       type: String,
       required: true,
@@ -40,6 +43,12 @@ const userSessionSchema = new mongoose.Schema(
       type: Date,
 
       default: Date.now,
+    },
+    isFirstVisit: {
+      type: Boolean,
+    },
+    contactData: {
+      type: mongoose.Schema.Types.Mixed,
     },
   },
   { timestamps: true }
