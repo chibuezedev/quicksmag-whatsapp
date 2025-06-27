@@ -348,7 +348,14 @@ What would you like to do today? 😋`;
         );
         break;
       case "checkout":
-        if (intent === "address") {
+        if (intent === "reset" || intent === "cancel") {
+          await this.handleCheckoutStep(
+            phoneNumber,
+            userSession,
+            messageText,
+            intent
+          );
+        } else if (messageText && messageText.trim().length > 0) {
           await this.handleCheckout(phoneNumber, userSession, messageText);
         } else {
           await this.handleCheckoutStep(
@@ -544,7 +551,7 @@ What would you like to do today? 😋`;
 
     await this.sendMessage(
       phoneNumber,
-      "Please provide your delivery address (e.g., '123 Main Street, Victoria Island, Lagos'):"
+      "Please provide your delivery address (e.g., 'Our Ladies 3 Hostel, Yahoo Junction, Awka.'):"
     );
   }
 
