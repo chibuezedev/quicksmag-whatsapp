@@ -407,6 +407,29 @@ What would you like to do today? 😋`;
   }
 
   async handleInteractiveResponse(phoneNumber, userSession, messageText) {
+    if (userSession.currentStep === "adding_to_cart") {
+      const intent = this.detectIntent(messageText);
+      if (
+        intent === "quantity" ||
+        ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"].includes(
+          messageText
+        )
+      ) {
+        await this.handleQuantitySelection(
+          phoneNumber,
+          userSession,
+          messageText
+        );
+        return;
+      }
+      if (messageText === "custom amount") {
+        await this.sendMessage(
+          phoneNumber,
+          "Please enter the quantity you want (1-10):"
+        );
+        return;
+      }
+    }
     if (messageText.startsWith("food_")) {
       const foodId = messageText.replace("food_", "");
       console.log("Food selected:", foodId);
