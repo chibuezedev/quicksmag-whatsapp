@@ -1456,12 +1456,15 @@ Please provide your delivery address:
       const paymentResponse = await opayService.createPayment({
         reference,
         orderNumber,
-        customerPhone: userSession.phoneNumber,
+        customerPhone: userSession.phoneNumber.replace("+", ""),
+        customerName: userSession.userName || "Customer",
         totalAmount,
       });
-console.log(paymentResponse)
+
+      console.log("Payment Response:", paymentResponse);
+
       if (paymentResponse.code === "00000") {
-        pendingPayment.paymentUrl = paymentResponse.data.payUrl;
+        pendingPayment.paymentUrl = paymentResponse.data.cashierUrl;
         await pendingPayment.save();
 
         const orderItemsText = cartItems
@@ -1481,7 +1484,7 @@ ${orderItemsText}
 💰 *Total Amount:* ₦${totalAmount}
 📍 *Delivery Address:* ${address}
 
-🔗 *Payment Link:* ${paymentResponse.data.payUrl}
+🔗 *Payment Link:* ${paymentResponse.data.cashierUrl}
 
 ⏰ *Payment expires in 30 minutes*
 
@@ -1490,19 +1493,32 @@ After making payment, return here and type "confirm payment" to complete your or
 ⚠️ *Important:* Your order will only be processed after successful payment confirmation.`;
 
         await this.sendMessage(phoneNumber, paymentMessage);
+
         userSession.cart = [];
         userSession.currentStep = "awaiting_payment";
         userSession.pendingPaymentReference = reference;
         await userSession.save();
       } else {
-        throw new Error("Failed to create payment link");
+        throw new Error(`Payment creation failed: ${paymentResponse.message}`);
       }
     } catch (error) {
       console.error("Error during checkout:", error);
-      await this.sendMessage(
-        phoneNumber,
-        "Sorry, there was an error processing your payment. Please try again or contact support."
-      );
+
+      let errorMessage = "Sorry, there was an error processing your payment.";
+
+      if (error.message.includes("authentication failed")) {
+        errorMessage =
+          "Payment system authentication failed. Please contact support.";
+      } else if (error.message.includes("request params not valid")) {
+        errorMessage = "Invalid payment parameters. Please try again.";
+      } else if (error.message.includes("reference already exists")) {
+        errorMessage = "Order reference already exists. Please try again.";
+      } else if (error.message.includes("service not available")) {
+        errorMessage =
+          "Payment service is temporarily unavailable. Please try again later.";
+      }
+
+      await this.sendMessage(phoneNumber, errorMessage);
     }
   }
 

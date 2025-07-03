@@ -11,12 +11,11 @@ class OpayService {
   }
 
   generateSignature(data) {
-    const sortedKeys = Object.keys(data).sort();
-    const signString = sortedKeys.map((key) => `${key}=${data[key]}`).join("&");
+    const jsonString = JSON.stringify(data);
 
     const signature = crypto
       .createHmac("sha512", this.privateKey)
-      .update(signString)
+      .update(jsonString)
       .digest("hex");
 
     return signature;
@@ -24,24 +23,33 @@ class OpayService {
 
   async createPayment(orderData) {
     const requestData = {
+      country: "NG",
       reference: orderData.reference,
-      mchShortName: "QuickSmag",
-      productName: "Food Order",
-      productDesc: `Order #${orderData.orderNumber}`,
-      userPhone: `+${orderData.customerPhone}`,
-      userRequestIp: "127.0.0.1",
-      amount: Math.round(orderData.totalAmount * 100),
-      currency: "NGN",
-      payMethods: ["account", "qrcode", "ussd", "transfer"],
-      payTypes: ["BalancePayment", "BonusPayment"],
-      callbackUrl: `${process.env.BASE_URL}/api/payment/callback`,
+      amount: {
+        total: Math.round(orderData.totalAmount * 100),
+        currency: "NGN",
+      },
       returnUrl: `${process.env.BASE_URL}/api/payment/return`,
-      expireAt: Math.floor(Date.now() / 1000) + 1800, // 30 minutes
+      callbackUrl: `${process.env.BASE_URL}/api/payment/callback`,
+      cancelUrl: `${process.env.BASE_URL}/api/payment/cancel`,
+      userInfo: {
+        userEmail: "customer@example.com",
+        userId: orderData.reference,
+        userMobile: orderData.customerPhone,
+        userName: orderData.customerName || "Customer",
+      },
+      product: {
+        name: "Food Order",
+        description: `Order #${orderData.orderNumber}`,
+      },
+      expireAt: 1800,
     };
 
     const signature = this.generateSignature(requestData);
+
     console.log("Request Data:", JSON.stringify(requestData, null, 2));
     console.log("Signature:", signature);
+
     try {
       const response = await axios.post(
         `${this.baseUrl}/api/v1/international/cashier/create`,
@@ -49,20 +57,27 @@ class OpayService {
         {
           headers: {
             "Content-Type": "application/json",
-            MerchantId: this.merchantId,
             Authorization: `Bearer ${this.publicKey}`,
+            MerchantId: this.merchantId,
             signature: signature,
           },
         }
       );
 
+      console.log("Opay Response:", response.data);
       return response.data;
     } catch (error) {
-      console.error(
-        "Opay payment creation error:",
-        error.response?.data || error.message
+      console.error("Opay payment creation error:", {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        message: error.message,
+      });
+      throw new Error(
+        `Failed to create payment: ${
+          error.response?.data?.message || error.message
+        }`
       );
-      throw new Error("Failed to create payment");
     }
   }
 
@@ -81,8 +96,8 @@ class OpayService {
         {
           headers: {
             "Content-Type": "application/json",
-            MerchantId: this.merchantId,
             Authorization: `Bearer ${this.publicKey}`,
+            MerchantId: this.merchantId,
             signature: signature,
           },
         }
@@ -90,11 +105,17 @@ class OpayService {
 
       return response.data;
     } catch (error) {
-      console.error(
-        "Opay payment verification error:",
-        error.response?.data || error.message
+      console.error("Opay payment verification error:", {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        message: error.message,
+      });
+      throw new Error(
+        `Failed to verify payment: ${
+          error.response?.data?.message || error.message
+        }`
       );
-      throw new Error("Failed to verify payment");
     }
   }
 }
