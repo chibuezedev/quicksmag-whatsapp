@@ -12,12 +12,10 @@ class OpayService {
 
   generateSignature(data) {
     const jsonString = JSON.stringify(data);
-
     const signature = crypto
       .createHmac("sha512", this.privateKey)
       .update(jsonString)
       .digest("hex");
-
     return signature;
   }
 
@@ -33,7 +31,7 @@ class OpayService {
       callbackUrl: `${process.env.BASE_URL}/api/payment/callback`,
       cancelUrl: `${process.env.BASE_URL}/api/payment/cancel`,
       userInfo: {
-        userEmail: "customer@example.com",
+        userEmail: orderData.customerEmail || "customer@example.com",
         userId: orderData.reference,
         userMobile: orderData.customerPhone,
         userName: orderData.customerName || "Customer",
@@ -117,6 +115,14 @@ class OpayService {
         }`
       );
     }
+  }
+
+  verifyCallbackSignature(payload, signature) {
+    const calculatedSignature = crypto
+      .createHmac("sha512", this.privateKey)
+      .update(JSON.stringify(payload))
+      .digest("hex");
+    return calculatedSignature === signature;
   }
 }
 
