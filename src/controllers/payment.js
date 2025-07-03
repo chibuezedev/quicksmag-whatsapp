@@ -23,11 +23,11 @@ class OpayService {
 
   async createPayment(orderData) {
     const requestData = {
-      country: "NG",
+      country: "EG",
       reference: orderData.reference,
       amount: {
         total: Math.round(orderData.totalAmount * 100),
-        currency: "NGN",
+        currency: "EGP",
       },
       returnUrl: `${process.env.BASE_URL}/api/payment/return`,
       callbackUrl: `${process.env.BASE_URL}/api/payment/callback`,
