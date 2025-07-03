@@ -52,6 +52,17 @@ const orderSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Restaurant",
     },
+    paymentMethod: {
+      type: String,
+      enum: ["cash", "card", "transfer", "opay"],
+      default: "cash",
+    },
+    paymentReference: String,
+    paymentStatus: {
+      type: String,
+      enum: ["pending", "paid", "failed"],
+      default: "pending",
+    },
   },
   { timestamps: true }
 );

@@ -1,10 +1,13 @@
 const express = require("express");
 const axios = require("axios");
+const { v4: uuidv4 } = require("uuid");
 
 const FoodItem = require("../models/food");
 const UserSession = require("../models/user");
 const Order = require("../models/order");
 const Category = require("../models/category");
+const PendingPayment = require("../models/paymentPending");
+const OpayService = require("../controllers/payment");
 
 class Bot {
   constructor() {
@@ -363,6 +366,33 @@ What would you like to do today? 😋`;
             userSession,
             messageText,
             intent
+          );
+        }
+        break;
+      case "awaiting_payment":
+        if (intent === "reset") {
+          await this.sendMessage(phoneNumber, "🔄 Starting over...");
+          userSession.currentStep = "initial";
+          userSession.pendingPaymentReference = null;
+          await userSession.save();
+          await this.sendGreetingResponse(phoneNumber, userSession);
+          return;
+        }
+
+        if (
+          messageText.toLowerCase().includes("confirm payment") ||
+          messageText.toLowerCase().includes("payment confirm") ||
+          messageText.toLowerCase().includes("paid")
+        ) {
+          await this.handlePaymentConfirmation(phoneNumber, userSession);
+        } else {
+          await this.sendMessage(
+            phoneNumber,
+            `⏳ Waiting for payment confirmation...
+
+Type "confirm payment" after you've completed the payment to verify and complete your order.
+
+Need help? Type "help" for assistance.`
           );
         }
         break;
@@ -1267,6 +1297,110 @@ Please provide your delivery address:
     await userSession.save();
   }
 
+  //   async handleCheckout(phoneNumber, userSession, messageText) {
+  //     const address = messageText.trim();
+
+  //     if (address.length < 10) {
+  //       await this.sendMessage(
+  //         phoneNumber,
+  //         "Please provide a more detailed delivery address (at least 10 characters)."
+  //       );
+  //       return;
+  //     }
+
+  //     try {
+  //       const orderNumber = "ORD" + Date.now();
+
+  //       const cartItems = await Promise.all(
+  //         userSession.cart.map(async (item) => {
+  //           const food = await FoodItem.findById(item.food);
+  //           if (!food) {
+  //             throw new Error(`Food item ${item.food} not found`);
+  //           }
+  //           return {
+  //             food: item.food,
+  //             quantity: item.quantity,
+  //             price: food.price,
+  //             name: food.name,
+  //             specialInstructions: item.specialInstructions || null,
+  //           };
+  //         })
+  //       );
+
+  //       const totalAmount = cartItems.reduce(
+  //         (sum, item) => sum + item.price * item.quantity,
+  //         0
+  //       );
+
+  //       const order = new Order({
+  //         orderNumber,
+  //         customerPhone: userSession.phoneNumber,
+  //         customerName: userSession.userName || "Customer",
+  //         items: cartItems.map((item) => ({
+  //           food: item.food,
+  //           quantity: item.quantity,
+  //           price: item.price,
+  //           specialInstructions: item.specialInstructions,
+  //         })),
+  //         totalAmount,
+  //         deliveryAddress: address,
+  //         restaurant: cartItems[0]
+  //           ? (await FoodItem.findById(cartItems[0].food)).restaurant
+  //           : null,
+  //       });
+
+  //       await order.save();
+
+  //       const orderItemsText = cartItems
+  //         .map((item) => {
+  //           const itemTotal = item.price * item.quantity;
+  //           let itemText = `• ${item.name} x${item.quantity} - ₦${itemTotal}`;
+
+  //           if (item.specialInstructions) {
+  //             itemText += `\n  (${item.specialInstructions})`;
+  //           }
+
+  //           return itemText;
+  //         })
+  //         .join("\n");
+
+  //       userSession.cart = [];
+  //       userSession.currentStep = "initial";
+  //       await userSession.save();
+
+  //       const confirmationMessage = `✅ *Order Confirmed!*
+
+  // 📋 *Order #:* ${orderNumber}
+
+  // 👋 *Customer:* ${userSession.userName || "Customer"}
+
+  // 🍽️ *Your Order:*
+  // ${orderItemsText}
+
+  // 💰 *Subtotal:* ₦${totalAmount}
+  // 🚚 *Delivery Fee:* ₦0 (Free delivery)
+  // 💳 *Total Amount:* ₦${totalAmount}
+
+  // 📍 *Delivery Address:*
+  // ${address}
+
+  // ⏱️ *Estimated Delivery:* 45-60 minutes
+  // 💵 *Payment:* Cash or Transfer on delivery
+
+  // You'll receive updates on your order status from our team.
+
+  // Thank you for your order, ${userSession.userName || ""}! 🙏`;
+
+  //       await this.sendMessage(phoneNumber, confirmationMessage);
+  //     } catch (error) {
+  //       console.error("Error during checkout:", error);
+  //       await this.sendMessage(
+  //         phoneNumber,
+  //         "Sorry, there was an error processing your order. Please try again or contact support."
+  //       );
+  //     }
+  //   }
+
   async handleCheckout(phoneNumber, userSession, messageText) {
     const address = messageText.trim();
 
@@ -1280,6 +1414,7 @@ Please provide your delivery address:
 
     try {
       const orderNumber = "ORD" + Date.now();
+      const reference = uuidv4();
 
       const cartItems = await Promise.all(
         userSession.cart.map(async (item) => {
@@ -1302,16 +1437,12 @@ Please provide your delivery address:
         0
       );
 
-      const order = new Order({
+      const pendingPayment = new PendingPayment({
+        reference,
         orderNumber,
         customerPhone: userSession.phoneNumber,
         customerName: userSession.userName || "Customer",
-        items: cartItems.map((item) => ({
-          food: item.food,
-          quantity: item.quantity,
-          price: item.price,
-          specialInstructions: item.specialInstructions,
-        })),
+        items: cartItems,
         totalAmount,
         deliveryAddress: address,
         restaurant: cartItems[0]
@@ -1319,54 +1450,160 @@ Please provide your delivery address:
           : null,
       });
 
-      await order.save();
+      await pendingPayment.save();
 
-      const orderItemsText = cartItems
-        .map((item) => {
-          const itemTotal = item.price * item.quantity;
-          let itemText = `• ${item.name} x${item.quantity} - ₦${itemTotal}`;
+      const opayService = new OpayService();
+      const paymentResponse = await opayService.createPayment({
+        reference,
+        orderNumber,
+        customerPhone: userSession.phoneNumber,
+        totalAmount,
+      });
+console.log(paymentResponse)
+      if (paymentResponse.code === "00000") {
+        pendingPayment.paymentUrl = paymentResponse.data.payUrl;
+        await pendingPayment.save();
 
-          if (item.specialInstructions) {
-            itemText += `\n  (${item.specialInstructions})`;
-          }
+        const orderItemsText = cartItems
+          .map((item) => {
+            const itemTotal = item.price * item.quantity;
+            return `• ${item.name} x${item.quantity} - ₦${itemTotal}`;
+          })
+          .join("\n");
 
-          return itemText;
-        })
-        .join("\n");
-
-      userSession.cart = [];
-      userSession.currentStep = "initial";
-      await userSession.save();
-
-      const confirmationMessage = `✅ *Order Confirmed!*
+        const paymentMessage = `💳 *Payment Required*
 
 📋 *Order #:* ${orderNumber}
-
-👋 *Customer:* ${userSession.userName || "Customer"}
 
 🍽️ *Your Order:*
 ${orderItemsText}
 
-💰 *Subtotal:* ₦${totalAmount}
-🚚 *Delivery Fee:* ₦0 (Free delivery)
-💳 *Total Amount:* ₦${totalAmount}
+💰 *Total Amount:* ₦${totalAmount}
+📍 *Delivery Address:* ${address}
 
-📍 *Delivery Address:*
-${address}
+🔗 *Payment Link:* ${paymentResponse.data.payUrl}
 
-⏱️ *Estimated Delivery:* 45-60 minutes
-💵 *Payment:* Cash or Transfer on delivery
+⏰ *Payment expires in 30 minutes*
 
-You'll receive updates on your order status from our team.
+After making payment, return here and type "confirm payment" to complete your order.
 
-Thank you for your order, ${userSession.userName || ""}! 🙏`;
+⚠️ *Important:* Your order will only be processed after successful payment confirmation.`;
 
-      await this.sendMessage(phoneNumber, confirmationMessage);
+        await this.sendMessage(phoneNumber, paymentMessage);
+        userSession.cart = [];
+        userSession.currentStep = "awaiting_payment";
+        userSession.pendingPaymentReference = reference;
+        await userSession.save();
+      } else {
+        throw new Error("Failed to create payment link");
+      }
     } catch (error) {
       console.error("Error during checkout:", error);
       await this.sendMessage(
         phoneNumber,
-        "Sorry, there was an error processing your order. Please try again or contact support."
+        "Sorry, there was an error processing your payment. Please try again or contact support."
+      );
+    }
+  }
+
+  async handlePaymentConfirmation(phoneNumber, userSession) {
+    if (!userSession.pendingPaymentReference) {
+      await this.sendMessage(
+        phoneNumber,
+        "No pending payment found. Please place a new order."
+      );
+      userSession.currentStep = "initial";
+      await userSession.save();
+      return;
+    }
+
+    try {
+      const opayService = new OpayService();
+      const paymentStatus = await opayService.verifyPayment(
+        userSession.pendingPaymentReference
+      );
+
+      if (
+        paymentStatus.code === "00000" &&
+        paymentStatus.data.status === "SUCCESS"
+      ) {
+        const pendingPayment = await PendingPayment.findOne({
+          reference: userSession.pendingPaymentReference,
+        });
+
+        if (!pendingPayment) {
+          await this.sendMessage(
+            phoneNumber,
+            "Payment record not found. Please contact support."
+          );
+          return;
+        }
+
+        const order = new Order({
+          orderNumber: pendingPayment.orderNumber,
+          customerPhone: pendingPayment.customerPhone,
+          customerName: pendingPayment.customerName,
+          items: pendingPayment.items.map((item) => ({
+            food: item.food,
+            quantity: item.quantity,
+            price: item.price,
+            specialInstructions: item.specialInstructions,
+          })),
+          totalAmount: pendingPayment.totalAmount,
+          deliveryAddress: pendingPayment.deliveryAddress,
+          restaurant: pendingPayment.restaurant,
+          paymentMethod: "opay",
+          paymentReference: userSession.pendingPaymentReference,
+          status: "confirmed",
+        });
+
+        await order.save();
+
+        pendingPayment.paymentStatus = "paid";
+        await pendingPayment.save();
+
+        const confirmationMessage = `✅ *Payment Confirmed & Order Placed!*
+
+📋 *Order #:* ${order.orderNumber}
+💳 *Payment:* ₦${order.totalAmount} (Paid via Opay)
+
+🍽️ *Your Order:*
+${pendingPayment.items
+  .map(
+    (item) =>
+      `• ${item.name} x${item.quantity} - ₦${item.price * item.quantity}`
+  )
+  .join("\n")}
+
+📍 *Delivery Address:* ${order.deliveryAddress}
+
+⏱️ *Estimated Delivery:* 45-60 minutes
+
+Your order is now being prepared! 👨‍🍳
+
+Thank you for your order, ${order.customerName}! 🙏`;
+
+        await this.sendMessage(phoneNumber, confirmationMessage);
+
+        // Reset session
+        userSession.currentStep = "initial";
+        userSession.pendingPaymentReference = null;
+        await userSession.save();
+      } else {
+        await this.sendMessage(
+          phoneNumber,
+          `❌ Payment verification failed or payment is still pending. 
+
+Current status: ${paymentStatus.data?.status || "Unknown"}
+
+Please try again in a few minutes or contact support if payment was made.`
+        );
+      }
+    } catch (error) {
+      console.error("Error verifying payment:", error);
+      await this.sendMessage(
+        phoneNumber,
+        "Sorry, there was an error verifying your payment. Please try again or contact support."
       );
     }
   }

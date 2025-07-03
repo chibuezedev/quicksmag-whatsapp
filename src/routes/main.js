@@ -8,6 +8,7 @@ const orderRoutes = require("./order");
 const analyticsRoutes = require("./dashboard");
 const sessionRoutes = require("./session");
 const authRoutes = require("./auth");
+const paymentRoutes = require("./payment")
 
 router.use(express.json());
 
@@ -18,5 +19,6 @@ router.use("/orders", orderRoutes);
 router.use("/analytics", analyticsRoutes);
 router.use("/sessions", sessionRoutes);
 router.use("/auth", authRoutes);
+router.use("/payment", paymentRoutes)
 
 module.exports = router;
