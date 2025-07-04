@@ -79,8 +79,6 @@ class PaystackService {
           },
         }
       );
-
-      console.log("Paystack Verify Response:", response.data);
       return response.data;
     } catch (error) {
       console.error("Paystack payment verification error:", {

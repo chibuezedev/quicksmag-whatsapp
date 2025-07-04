@@ -1,3 +1,4 @@
+require("dotenv").config();
 const express = require("express");
 const PaystackService = require("../controllers/payment");
 const PendingPayment = require("../models/paymentPending");
@@ -16,7 +17,7 @@ router.post(
       const paystackService = new PaystackService();
       const whatsappBot = new WhatsAppBot();
 
-      const payloadString = payload.toString('utf8');
+      const payloadString = payload.toString("utf8");
       const parsedPayload = JSON.parse(payloadString);
 
       if (!paystackService.verifyWebhookSignature(payloadString, signature)) {
@@ -254,6 +255,42 @@ router.get("/paystack/callback", async (req, res) => {
       verification.status === true &&
       verification.data.status === "success"
     ) {
+      res.redirect(
+        `${process.env.FRONTEND_URL}/payment/success?reference=${
+          reference || trxref
+        }`
+      );
+    } else {
+      res.redirect(
+        `${process.env.FRONTEND_URL}/payment/failure?reference=${
+          reference || trxref
+        }`
+      );
+    }
+  } catch (error) {
+    console.error("Error in payment callback:", error);
+    res.status(500).json({
+      success: false,
+      message: "Payment verification error",
+      reference: reference || trxref,
+      error: error.message,
+    });
+  }
+});
+
+router.get("/paystack/verify", async (req, res) => {
+  const { reference, trxref } = req.query;
+
+  try {
+    const paystackService = new PaystackService();
+    const verification = await paystackService.verifyPayment(
+      reference || trxref
+    );
+
+    if (
+      verification.status === true &&
+      verification.data.status === "success"
+    ) {
       res.status(200).json({
         success: true,
         message: "Payment verified successfully",
@@ -269,7 +306,7 @@ router.get("/paystack/callback", async (req, res) => {
       });
     }
   } catch (error) {
-    console.error("Error in payment callback:", error);
+    console.error("Error in payment verification:", error);
     res.status(500).json({
       success: false,
       message: "Payment verification error",
