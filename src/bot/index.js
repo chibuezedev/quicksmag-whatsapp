@@ -7,7 +7,7 @@ const UserSession = require("../models/user");
 const Order = require("../models/order");
 const Category = require("../models/category");
 const PendingPayment = require("../models/paymentPending");
-const OpayService = require("../controllers/payment");
+const PaystackService = require("../controllers/payment");
 
 class Bot {
   constructor() {
@@ -1452,25 +1452,28 @@ Please provide your delivery address:
 
       await pendingPayment.save();
 
-      const opayService = new OpayService();
-      const paymentResponse = await opayService.createPayment({
+      const paystackService = new PaystackService();
+      const paymentResponse = await paystackService.initializePayment({
         reference,
         orderNumber,
-        customerPhone: userSession.phoneNumber.replace("+", ""),
+        customerPhone: userSession.phoneNumber,
         customerName: userSession.userName || "Customer",
         totalAmount,
+        customerEmail: userSession.email || "customer@quicksmag.com",
       });
 
-      console.log("Payment Response:", paymentResponse);
+      console.log("Paystack Payment Response:", paymentResponse);
 
-      if (paymentResponse.code === "00000") {
-        pendingPayment.paymentUrl = paymentResponse.data.cashierUrl;
+      if (paymentResponse.status === true) {
+        pendingPayment.paymentUrl = paymentResponse.data.authorization_url;
         await pendingPayment.save();
 
         const orderItemsText = cartItems
           .map((item) => {
             const itemTotal = item.price * item.quantity;
-            return `• ${item.name} x${item.quantity} - ₦${itemTotal}`;
+            return `• ${item.name} x${
+              item.quantity
+            } - ₦${itemTotal.toLocaleString()}`;
           })
           .join("\n");
 
@@ -1481,16 +1484,18 @@ Please provide your delivery address:
 🍽️ *Your Order:*
 ${orderItemsText}
 
-💰 *Total Amount:* ₦${totalAmount}
+💰 *Total Amount:* ₦${totalAmount.toLocaleString()}
 📍 *Delivery Address:* ${address}
 
-🔗 *Payment Link:* ${paymentResponse.data.cashierUrl}
+🔗 *Payment Link:* ${paymentResponse.data.authorization_url}
 
 ⏰ *Payment expires in 30 minutes*
 
 After making payment, return here and type "confirm payment" to complete your order.
 
-⚠️ *Important:* Your order will only be processed after successful payment confirmation.`;
+⚠️ *Important:* Your order will only be processed after successful payment confirmation.
+
+💡 *Payment Options:* Card, Bank Transfer, USSD, Mobile Money`;
 
         await this.sendMessage(phoneNumber, paymentMessage);
 
@@ -1499,23 +1504,25 @@ After making payment, return here and type "confirm payment" to complete your or
         userSession.pendingPaymentReference = reference;
         await userSession.save();
       } else {
-        throw new Error(`Payment creation failed: ${paymentResponse.message}`);
+        throw new Error(
+          `Payment initialization failed: ${paymentResponse.message}`
+        );
       }
     } catch (error) {
       console.error("Error during checkout:", error);
 
       let errorMessage = "Sorry, there was an error processing your payment.";
 
-      if (error.message.includes("authentication failed")) {
+      if (error.message.includes("Invalid email")) {
         errorMessage =
-          "Payment system authentication failed. Please contact support.";
-      } else if (error.message.includes("request params not valid")) {
-        errorMessage = "Invalid payment parameters. Please try again.";
-      } else if (error.message.includes("reference already exists")) {
+          "Please provide a valid email address to proceed with payment.";
+      } else if (error.message.includes("Invalid amount")) {
+        errorMessage = "Invalid payment amount. Please try again.";
+      } else if (error.message.includes("reference")) {
         errorMessage = "Order reference already exists. Please try again.";
-      } else if (error.message.includes("service not available")) {
+      } else if (error.message.includes("network")) {
         errorMessage =
-          "Payment service is temporarily unavailable. Please try again later.";
+          "Network error. Please check your connection and try again.";
       }
 
       await this.sendMessage(phoneNumber, errorMessage);
@@ -1534,14 +1541,14 @@ After making payment, return here and type "confirm payment" to complete your or
     }
 
     try {
-      const opayService = new OpayService();
-      const paymentStatus = await opayService.verifyPayment(
+      const paystackService = new PaystackService();
+      const paymentStatus = await paystackService.verifyPayment(
         userSession.pendingPaymentReference
       );
 
       if (
-        paymentStatus.code === "00000" &&
-        paymentStatus.data.status === "SUCCESS"
+        paymentStatus.status === true &&
+        paymentStatus.data.status === "success"
       ) {
         const pendingPayment = await PendingPayment.findOne({
           reference: userSession.pendingPaymentReference,
@@ -1552,6 +1559,27 @@ After making payment, return here and type "confirm payment" to complete your or
             phoneNumber,
             "Payment record not found. Please contact support."
           );
+          return;
+        }
+
+        const existingOrder = await Order.findOne({
+          paymentReference: userSession.pendingPaymentReference,
+        });
+
+        if (existingOrder) {
+          await this.sendMessage(
+            phoneNumber,
+            `✅ Your order has already been confirmed!
+            
+📋 *Order #:* ${existingOrder.orderNumber}
+⏱️ *Status:* ${existingOrder.status}
+
+Your order is being processed. Thank you for your patience!`
+          );
+
+          userSession.currentStep = "initial";
+          userSession.pendingPaymentReference = null;
+          await userSession.save();
           return;
         }
 
@@ -1568,9 +1596,10 @@ After making payment, return here and type "confirm payment" to complete your or
           totalAmount: pendingPayment.totalAmount,
           deliveryAddress: pendingPayment.deliveryAddress,
           restaurant: pendingPayment.restaurant,
-          paymentMethod: "opay",
+          paymentMethod: "paystack",
           paymentReference: userSession.pendingPaymentReference,
           status: "confirmed",
+          paymentStatus: "paid",
         });
 
         await order.save();
@@ -1581,13 +1610,15 @@ After making payment, return here and type "confirm payment" to complete your or
         const confirmationMessage = `✅ *Payment Confirmed & Order Placed!*
 
 📋 *Order #:* ${order.orderNumber}
-💳 *Payment:* ₦${order.totalAmount} (Paid via Opay)
+💳 *Payment:* ₦${order.totalAmount.toLocaleString()} (Paid via Paystack)
 
 🍽️ *Your Order:*
 ${pendingPayment.items
   .map(
     (item) =>
-      `• ${item.name} x${item.quantity} - ₦${item.price * item.quantity}`
+      `• ${item.name} x${item.quantity} - ₦${(
+        item.price * item.quantity
+      ).toLocaleString()}`
   )
   .join("\n")}
 
@@ -1597,29 +1628,96 @@ ${pendingPayment.items
 
 Your order is now being prepared! 👨‍🍳
 
-Thank you for your order, ${order.customerName}! 🙏`;
+Thank you for your order, ${order.customerName}! 🙏
+
+You can track your order status by typing "track order" anytime.`;
 
         await this.sendMessage(phoneNumber, confirmationMessage);
 
-        // Reset session
         userSession.currentStep = "initial";
         userSession.pendingPaymentReference = null;
         await userSession.save();
+
+        // Optional: Send notification to restaurant
+        // await this.notifyRestaurant(order);
+      } else if (paymentStatus.data.status === "failed") {
+        await this.sendMessage(
+          phoneNumber,
+          `❌ Payment failed. 
+
+Reason: ${paymentStatus.data.gateway_response || "Payment was not successful"}
+
+Please try again or contact support if you believe this is an error.`
+        );
       } else {
         await this.sendMessage(
           phoneNumber,
-          `❌ Payment verification failed or payment is still pending. 
+          `⏳ Payment verification pending.
 
-Current status: ${paymentStatus.data?.status || "Unknown"}
+Current status: ${paymentStatus.data.status}
 
-Please try again in a few minutes or contact support if payment was made.`
+Please wait a moment and try again. If payment was made successfully, it may take a few minutes to reflect.`
         );
       }
     } catch (error) {
       console.error("Error verifying payment:", error);
       await this.sendMessage(
         phoneNumber,
-        "Sorry, there was an error verifying your payment. Please try again or contact support."
+        "Sorry, there was an error verifying your payment. Please try again or contact support if payment was made."
+      );
+    }
+  }
+
+  async handlePaystackWebhook(payload, signature) {
+    const paystackService = new PaystackService();
+
+    if (!paystackService.verifyWebhookSignature(payload, signature)) {
+      console.error("Invalid webhook signature");
+      return false;
+    }
+
+    const event = payload.event;
+    const data = payload.data;
+
+    switch (event) {
+      case "charge.success":
+        await this.handleSuccessfulPayment(data);
+        break;
+      case "charge.failed":
+        await this.handleFailedPayment(data);
+        break;
+      default:
+        console.log(`Unhandled webhook event: ${event}`);
+    }
+
+    return true;
+  }
+
+  async handleSuccessfulPayment(data) {
+    const reference = data.reference;
+    const pendingPayment = await PendingPayment.findOne({ reference });
+
+    if (pendingPayment && pendingPayment.paymentStatus === "pending") {
+      pendingPayment.paymentStatus = "paid";
+      await pendingPayment.save();
+
+      await this.sendMessage(
+        pendingPayment.customerPhone,
+        `✅ Payment confirmed! Your order #${pendingPayment.orderNumber} is being processed.`
+      );
+    }
+  }
+
+  async handleFailedPayment(data) {
+    const reference = data.reference;
+    const pendingPayment = await PendingPayment.findOne({ reference });
+
+    if (pendingPayment && pendingPayment.paymentStatus === "pending") {
+      pendingPayment.paymentStatus = "failed";
+      await pendingPayment.save();
+      await this.sendMessage(
+        pendingPayment.customerPhone,
+        `❌ Payment failed for order #${pendingPayment.orderNumber}. Please try again.`
       );
     }
   }

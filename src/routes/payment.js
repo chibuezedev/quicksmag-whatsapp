@@ -1,193 +1,284 @@
 const express = require("express");
+const PaystackService = require("../controllers/payment");
 const PendingPayment = require("../models/paymentPending");
-const OpayService = require("../controllers/payment");
+const Order = require("../models/order");
+const WhatsAppBot = require("../bot");
 
 const router = express.Router();
-const opayService = new OpayService();
 
-router.post("/callback", async (req, res) => {
-  try {
-    console.log("Callback received:", JSON.stringify(req.body, null, 2));
-
-    const { payload, sha512, type } = req.body;
-
-    if (!payload || !sha512) {
-      console.error("Invalid callback - missing payload or signature");
-      return res.status(400).json({ error: "Invalid callback data" });
-    }
-
-    if (!opayService.verifyCallbackSignature(payload, sha512)) {
-      console.error("Invalid callback signature");
-      return res.status(401).json({ error: "Invalid signature" });
-    }
-
-    const { reference, status, amount, currency } = payload;
-
-    console.log(`Callback for reference: ${reference}, status: ${status}`);
-
-    if (status === "SUCCESS") {
-      const pendingPayment = await PendingPayment.findOne({ reference });
-      if (pendingPayment) {
-        pendingPayment.paymentStatus = "paid";
-        pendingPayment.transactionId = payload.transactionId;
-        pendingPayment.amount = amount;
-        pendingPayment.currency = currency;
-        await pendingPayment.save();
-        console.log(`Payment confirmed for reference: ${reference}`);
-      } else {
-        console.error(`Pending payment not found for reference: ${reference}`);
-      }
-    } else if (status === "FAIL") {
-      const pendingPayment = await PendingPayment.findOne({ reference });
-      if (pendingPayment) {
-        pendingPayment.paymentStatus = "failed";
-        pendingPayment.failureReason = payload.displayedFailure;
-        await pendingPayment.save();
-        console.log(`Payment failed for reference: ${reference}`);
-      }
-    }
-
-    res.status(200).json({ status: "success" });
-  } catch (error) {
-    console.error("Payment callback error:", error);
-    res.status(200).json({ status: "error", message: error.message });
-  }
-});
-
-router.get("/return", async (req, res) => {
-  try {
-    const { reference } = req.query;
-
-    if (!reference) {
-      return res.send(`
-        <html>
-          <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h2>❌ Invalid Payment Reference</h2>
-            <p>No payment reference found.</p>
-            <p>Please contact support if you believe this is an error.</p>
-          </body>
-        </html>
-      `);
-    }
+router.post(
+  "/paystack/webhook",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    const signature = req.headers["x-paystack-signature"];
+    const payload = req.body;
 
     try {
-      const verificationResult = await opayService.verifyPayment(reference);
-      const isSuccess = verificationResult.data?.status === "SUCCESS";
+      const paystackService = new PaystackService();
+      const whatsappBot = new WhatsAppBot();
 
-      if (isSuccess) {
-        const pendingPayment = await PendingPayment.findOne({ reference });
-        if (pendingPayment && pendingPayment.paymentStatus !== "paid") {
-          pendingPayment.paymentStatus = "paid";
-          await pendingPayment.save();
-        }
-
-        res.send(`
-          <html>
-            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-              <h2>✅ Payment Successful!</h2>
-              <p>Your payment has been processed successfully.</p>
-              <p><strong>Reference:</strong> ${reference}</p>
-              <p>Please return to WhatsApp and type "confirm payment" to complete your order.</p>
-              <script>
-                setTimeout(() => {
-                  window.close();
-                }, 5000);
-              </script>
-            </body>
-          </html>
-        `);
-      } else {
-        res.send(`
-          <html>
-            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-              <h2>❌ Payment Not Completed</h2>
-              <p>Your payment was not successful or is still pending.</p>
-              <p><strong>Reference:</strong> ${reference}</p>
-              <p>Please try again or contact support.</p>
-              <script>
-                setTimeout(() => {
-                  window.close();
-                }, 5000);
-              </script>
-            </body>
-          </html>
-        `);
+      if (
+        !paystackService.verifyWebhookSignature(JSON.parse(payload), signature)
+      ) {
+        console.error("Invalid webhook signature");
+        return res.status(400).json({ error: "Invalid signature" });
       }
-    } catch (verificationError) {
-      console.error("Payment verification error:", verificationError);
-      res.send(`
-        <html>
-          <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h2>⚠️ Payment Verification Failed</h2>
-            <p>Unable to verify payment status at this time.</p>
-            <p><strong>Reference:</strong> ${reference}</p>
-            <p>Please contact support for assistance.</p>
-            <script>
-              setTimeout(() => {
-                window.close();
-              }, 8000);
-            </script>
-          </body>
-        </html>
-      `);
+
+      const event = JSON.parse(payload);
+      console.log("Paystack webhook received:", event.event);
+
+      switch (event.event) {
+        case "charge.success":
+          await handleChargeSuccess(event.data, whatsappBot);
+          break;
+
+        case "charge.failed":
+          await handleChargeFailed(event.data, whatsappBot);
+          break;
+
+        case "transfer.success":
+          await handleTransferSuccess(event.data, whatsappBot);
+          break;
+
+        case "transfer.failed":
+          await handleTransferFailed(event.data, whatsappBot);
+          break;
+
+        default:
+          console.log(`Unhandled webhook event: ${event.event}`);
+      }
+
+      res.status(200).json({ message: "Webhook processed successfully" });
+    } catch (error) {
+      console.error("Error processing webhook:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+async function handleChargeSuccess(data, whatsappBot) {
+  const reference = data.reference;
+  console.log(`Processing successful charge for reference: ${reference}`);
+
+  try {
+    const pendingPayment = await PendingPayment.findOne({ reference });
+
+    if (!pendingPayment) {
+      console.log(`No pending payment found for reference: ${reference}`);
+      return;
+    }
+
+    const existingOrder = await Order.findOne({ paymentReference: reference });
+    if (existingOrder) {
+      console.log(`Order already exists for reference: ${reference}`);
+      return;
+    }
+    const order = new Order({
+      orderNumber: pendingPayment.orderNumber,
+      customerPhone: pendingPayment.customerPhone,
+      customerName: pendingPayment.customerName,
+      items: pendingPayment.items.map((item) => ({
+        food: item.food,
+        quantity: item.quantity,
+        price: item.price,
+        specialInstructions: item.specialInstructions,
+      })),
+      totalAmount: pendingPayment.totalAmount,
+      deliveryAddress: pendingPayment.deliveryAddress,
+      restaurant: pendingPayment.restaurant,
+      paymentMethod: "paystack",
+      paymentReference: reference,
+      status: "confirmed",
+      paymentStatus: "paid",
+      paymentDetails: {
+        transactionId: data.id,
+        channel: data.channel,
+        brand: data.authorization?.brand,
+        last4: data.authorization?.last4,
+        authorization: data.authorization,
+      },
+    });
+
+    await order.save();
+
+    pendingPayment.paymentStatus = "paid";
+    await pendingPayment.save();
+
+    const confirmationMessage = `✅ *Payment Confirmed & Order Placed!*
+
+📋 *Order #:* ${order.orderNumber}
+💳 *Payment:* ₦${order.totalAmount.toLocaleString()} (Paid via Paystack)
+
+🍽️ *Your Order:*
+${pendingPayment.items
+  .map(
+    (item) =>
+      `• ${item.name} x${item.quantity} - ₦${(
+        item.price * item.quantity
+      ).toLocaleString()}`
+  )
+  .join("\n")}
+
+📍 *Delivery Address:* ${order.deliveryAddress}
+
+⏱️ *Estimated Delivery:* 45-60 minutes
+
+Your order is now being prepared! 👨‍🍳
+
+Thank you for your order, ${order.customerName}! 🙏`;
+
+    await whatsappBot.sendMessage(
+      pendingPayment.customerPhone,
+      confirmationMessage
+    );
+
+    console.log(`Order created successfully for reference: ${reference}`);
+  } catch (error) {
+    console.error("Error handling charge success:", error);
+  }
+}
+
+async function handleChargeFailed(data, whatsappBot) {
+  const reference = data.reference;
+  console.log(`Processing failed charge for reference: ${reference}`);
+
+  try {
+    const pendingPayment = await PendingPayment.findOne({ reference });
+
+    if (!pendingPayment) {
+      console.log(`No pending payment found for reference: ${reference}`);
+      return;
+    }
+
+    pendingPayment.paymentStatus = "failed";
+    await pendingPayment.save();
+
+    const failureMessage = `❌ *Payment Failed*
+
+📋 *Order #:* ${pendingPayment.orderNumber}
+💳 *Amount:* ₦${pendingPayment.totalAmount.toLocaleString()}
+
+Reason: ${data.gateway_response || "Payment was not successful"}
+
+Please try placing your order again or contact support if you need assistance.`;
+
+    await whatsappBot.sendMessage(pendingPayment.customerPhone, failureMessage);
+
+    console.log(`Payment failure processed for reference: ${reference}`);
+  } catch (error) {
+    console.error("Error handling charge failure:", error);
+  }
+}
+
+async function handleTransferSuccess(data, whatsappBot) {
+  console.log("Transfer success:", data);
+
+  try {
+    const reference = data.reference;
+    const pendingPayment = await PendingPayment.findOne({ reference });
+
+    if (!pendingPayment) {
+      console.log(`No pending payment found for reference: ${reference}`);
+      return;
+    }
+
+    const successMessage = `✅ *Transfer Successful!*
+
+Your refund or payout of ₦${data.amount / 100} has been processed successfully.
+
+Reference: ${reference}
+Status: ${data.status}
+
+Thank you for using our service!`;
+
+    await whatsappBot.sendMessage(pendingPayment.customerPhone, successMessage);
+  } catch (error) {
+    console.error("Error handling transfer success:", error);
+  }
+}
+
+async function handleTransferFailed(data, whatsappBot) {
+  console.log("Transfer failed:", data);
+
+  try {
+    const reference = data.reference;
+    const pendingPayment = await PendingPayment.findOne({ reference });
+
+    if (!pendingPayment) {
+      console.log(`No pending payment found for reference: ${reference}`);
+      return;
+    }
+
+    const failedMessage = `❌ *Transfer Failed!*
+
+We were unable to process your refund or payout of ₦${data.amount / 100}.
+
+Reference: ${reference}
+Reason: ${data.reason || "Unknown error"}
+
+Please contact support for assistance.`;
+
+    await whatsappBot.sendMessage(pendingPayment.customerPhone, failedMessage);
+  } catch (error) {
+    console.error("Error handling transfer failed:", error);
+  }
+}
+
+router.get("/paystack/callback", async (req, res) => {
+  const { reference, trxref } = req.query;
+
+  try {
+    const paystackService = new PaystackService();
+    const verification = await paystackService.verifyPayment(
+      reference || trxref
+    );
+
+    if (
+      verification.status === true &&
+      verification.data.status === "success"
+    ) {
+      res.status(200).json({
+        success: true,
+        message: "Payment verified successfully",
+        reference: reference || trxref,
+        data: verification.data,
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: "Payment verification failed",
+        reference: reference || trxref,
+        data: verification.data,
+      });
     }
   } catch (error) {
-    console.error("Payment return error:", error);
-    res.status(500).send(`
-      <html>
-        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-          <h2>❌ System Error</h2>
-          <p>An error occurred while processing your request.</p>
-          <p>Please contact support.</p>
-        </body>
-      </html>
-    `);
+    console.error("Error in payment callback:", error);
+    res.status(500).json({
+      success: false,
+      message: "Payment verification error",
+      reference: reference || trxref,
+      error: error.message,
+    });
   }
 });
 
-router.get("/cancel", async (req, res) => {
+router.get("/paystack/status/:reference", async (req, res) => {
+  const { reference } = req.params;
+
   try {
-    const { reference } = req.query;
+    const paystackService = new PaystackService();
+    const verification = await paystackService.verifyPayment(reference);
 
-    console.log(`Payment cancelled: reference=${reference}`);
-
-    if (reference) {
-      const pendingPayment = await PendingPayment.findOne({ reference });
-      if (pendingPayment) {
-        pendingPayment.paymentStatus = "cancelled";
-        await pendingPayment.save();
-      }
-    }
-
-    res.send(`
-      <html>
-        <head>
-          <title>Payment Cancelled</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        </head>
-        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px; background-color: #fffbf0;">
-          <div style="max-width: 500px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-            <h2 style="color: #ffc107;">⚠️ Payment Cancelled</h2>
-            <p>You have cancelled the payment process.</p>
-            ${
-              reference ? `<p><strong>Reference:</strong> ${reference}</p>` : ""
-            }
-            <p style="background: #fff8e1; padding: 15px; border-radius: 5px; margin: 20px 0;">
-              Your order is still in your cart. Return to WhatsApp to try again or modify your order.
-            </p>
-            <p style="color: #666; font-size: 14px;">This window will close automatically in 10 seconds.</p>
-          </div>
-          <script>
-            setTimeout(() => {
-              window.close();
-            }, 10000);
-          </script>
-        </body>
-      </html>
-    `);
+    res.json({
+      status: "success",
+      data: verification.data,
+    });
   } catch (error) {
-    console.error("Payment cancel error:", error);
-    res.status(500).send("Internal server error");
+    console.error("Error checking payment status:", error);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to check payment status",
+    });
   }
 });
 

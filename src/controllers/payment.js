@@ -1,78 +1,68 @@
-const crypto = require("crypto");
 const axios = require("axios");
+const crypto = require("crypto");
 require("dotenv").config();
 
-class OpayService {
+class PaystackService {
   constructor() {
-    this.merchantId = process.env.OPAY_MERCHANT_ID;
-    this.publicKey = process.env.OPAY_PUBLIC_KEY;
-    this.privateKey = process.env.OPAY_PRIVATE_KEY;
-    this.baseUrl = process.env.OPAY_BASE_URL;
+    this.secretKey = process.env.PAYSTACK_SECRET_KEY;
+    this.publicKey = process.env.PAYSTACK_PUBLIC_KEY;
+    this.baseUrl = "https://api.paystack.co";
   }
 
-  generateSignature(data) {
-    const jsonString = JSON.stringify(data);
-    const signature = crypto
-      .createHmac("sha512", this.privateKey)
-      .update(jsonString)
-      .digest("hex");
-    return signature;
-  }
-
-  async createPayment(orderData) {
+  async initializePayment(orderData) {
     const requestData = {
-      country: "NG",
+      email:
+        orderData.customerEmail ||
+        `${orderData.customerPhone
+          .replace("+", "")
+          .replace(/\D/g, "")}@foodorder.com`,
+      amount: Math.round(orderData.totalAmount * 100), // Convert to kobo
       reference: orderData.reference,
-      amount: {
-        total: Math.round(orderData.totalAmount * 100),
-        currency: "NGN",
+      currency: "NGN",
+      callback_url: `${process.env.BASE_URL}/api/payment/paystack/callback`,
+      metadata: {
+        orderNumber: orderData.orderNumber,
+        customerPhone: orderData.customerPhone,
+        customerName: orderData.customerName || "Customer",
+        custom_fields: [
+          {
+            display_name: "Order Number",
+            variable_name: "order_number",
+            value: orderData.orderNumber,
+          },
+          {
+            display_name: "Customer Phone",
+            variable_name: "customer_phone",
+            value: orderData.customerPhone,
+          },
+        ],
       },
-      returnUrl: `${process.env.BASE_URL}/api/payment/return`,
-      callbackUrl: `${process.env.BASE_URL}/api/payment/callback`,
-      cancelUrl: `${process.env.BASE_URL}/api/payment/cancel`,
-      userInfo: {
-        userEmail: orderData.customerEmail || "customer@example.com",
-        userId: orderData.reference,
-        userMobile: orderData.customerPhone,
-        userName: orderData.customerName || "Customer",
-      },
-      product: {
-        name: "Food Order",
-        description: `Order #${orderData.orderNumber}`,
-      },
-      expireAt: 1800,
+      channels: ["card", "bank", "ussd", "qr", "mobile_money", "bank_transfer"],
     };
-
-    const signature = this.generateSignature(requestData);
-
-    console.log("Request Data:", JSON.stringify(requestData, null, 2));
-    console.log("Signature:", signature);
 
     try {
       const response = await axios.post(
-        `${this.baseUrl}/api/v1/international/cashier/create`,
+        `${this.baseUrl}/transaction/initialize`,
         requestData,
         {
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${this.publicKey}`,
-            MerchantId: this.merchantId,
-            signature: signature,
+            Authorization: `Bearer ${this.secretKey}`,
           },
         }
       );
 
-      console.log("Opay Response:", response.data);
+      console.log("Paystack Initialize Response:", response.data);
       return response.data;
     } catch (error) {
-      console.error("Opay payment creation error:", {
+      console.error("Paystack payment initialization error:", {
         status: error.response?.status,
         statusText: error.response?.statusText,
         data: error.response?.data,
         message: error.message,
       });
       throw new Error(
-        `Failed to create payment: ${
+        `Failed to initialize payment: ${
           error.response?.data?.message || error.message
         }`
       );
@@ -80,30 +70,20 @@ class OpayService {
   }
 
   async verifyPayment(reference) {
-    const requestData = {
-      reference: reference,
-      orderNo: reference,
-    };
-
-    const signature = this.generateSignature(requestData);
-
     try {
-      const response = await axios.post(
-        `${this.baseUrl}/api/v1/international/cashier/status`,
-        requestData,
+      const response = await axios.get(
+        `${this.baseUrl}/transaction/verify/${reference}`,
         {
           headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${this.publicKey}`,
-            MerchantId: this.merchantId,
-            signature: signature,
+            Authorization: `Bearer ${this.secretKey}`,
           },
         }
       );
 
+      console.log("Paystack Verify Response:", response.data);
       return response.data;
     } catch (error) {
-      console.error("Opay payment verification error:", {
+      console.error("Paystack payment verification error:", {
         status: error.response?.status,
         statusText: error.response?.statusText,
         data: error.response?.data,
@@ -117,13 +97,85 @@ class OpayService {
     }
   }
 
-  verifyCallbackSignature(payload, signature) {
-    const calculatedSignature = crypto
-      .createHmac("sha512", this.privateKey)
+  verifyWebhookSignature(payload, signature) {
+    const hash = crypto
+      .createHmac("sha512", this.secretKey)
       .update(JSON.stringify(payload))
       .digest("hex");
-    return calculatedSignature === signature;
+    return hash === signature;
+  }
+
+  async getAllTransactions(page = 1, perPage = 50) {
+    try {
+      const response = await axios.get(
+        `${this.baseUrl}/transaction?page=${page}&perPage=${perPage}`,
+        {
+          headers: {
+            Authorization: `Bearer ${this.secretKey}`,
+          },
+        }
+      );
+
+      return response.data;
+    } catch (error) {
+      console.error("Paystack get transactions error:", error.response?.data);
+      throw new Error(
+        `Failed to get transactions: ${
+          error.response?.data?.message || error.message
+        }`
+      );
+    }
+  }
+
+  async getTransactionTimeline(reference) {
+    try {
+      const response = await axios.get(
+        `${this.baseUrl}/transaction/timeline/${reference}`,
+        {
+          headers: {
+            Authorization: `Bearer ${this.secretKey}`,
+          },
+        }
+      );
+
+      return response.data;
+    } catch (error) {
+      console.error("Paystack get timeline error:", error.response?.data);
+      throw new Error(
+        `Failed to get transaction timeline: ${
+          error.response?.data?.message || error.message
+        }`
+      );
+    }
+  }
+
+  async refundTransaction(reference, amount = null) {
+    const requestData = {
+      transaction: reference,
+    };
+
+    if (amount) {
+      requestData.amount = Math.round(amount * 100); // Convert to kobo
+    }
+
+    try {
+      const response = await axios.post(`${this.baseUrl}/refund`, requestData, {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.secretKey}`,
+        },
+      });
+
+      return response.data;
+    } catch (error) {
+      console.error("Paystack refund error:", error.response?.data);
+      throw new Error(
+        `Failed to process refund: ${
+          error.response?.data?.message || error.message
+        }`
+      );
+    }
   }
 }
 
-module.exports = OpayService;
+module.exports = PaystackService;

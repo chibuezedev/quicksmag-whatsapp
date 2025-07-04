@@ -12,6 +12,7 @@ const orderSchema = new mongoose.Schema(
       required: true,
     },
     customerName: String,
+    customerEmail: String,
     items: [
       {
         food: {
@@ -37,6 +38,7 @@ const orderSchema = new mongoose.Schema(
         "confirmed",
         "preparing",
         "ready",
+        "out_for_delivery",
         "delivered",
         "cancelled",
       ],
@@ -45,27 +47,61 @@ const orderSchema = new mongoose.Schema(
     deliveryAddress: String,
     paymentMethod: {
       type: String,
-      enum: ["cash", "card", "transfer"],
+      enum: ["cash", "card", "transfer", "paystack", "opay"],
       default: "cash",
     },
     restaurant: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Restaurant",
     },
-    paymentMethod: {
+    paymentReference: {
       type: String,
-      enum: ["cash", "card", "transfer", "opay"],
-      default: "cash",
+      unique: true,
+      sparse: true,
     },
-    paymentReference: String,
     paymentStatus: {
       type: String,
-      enum: ["pending", "paid", "failed"],
+      enum: ["pending", "paid", "failed", "refunded"],
       default: "pending",
     },
+    paymentDetails: {
+      transactionId: String,
+      channel: String,
+      brand: String,
+      last4: String,
+      authorization: {
+        authorization_code: String,
+        bin: String,
+        card_type: String,
+        bank: String,
+      },
+    },
+    deliveryFee: {
+      type: Number,
+      default: 0,
+    },
+    notes: String,
+    estimatedDeliveryTime: Date,
+    actualDeliveryTime: Date,
+    cancelReason: String,
+    refundAmount: Number,
+    refundReason: String,
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  }
 );
+
+orderSchema.virtual("totalWithDelivery").get(function () {
+  return this.totalAmount + this.deliveryFee;
+});
+
+orderSchema.index({ customerPhone: 1, createdAt: -1 });
+orderSchema.index({ paymentReference: 1 });
+orderSchema.index({ orderNumber: 1 });
+orderSchema.index({ status: 1 });
 
 const Order = mongoose.model("Order", orderSchema);
 
