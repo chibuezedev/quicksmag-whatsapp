@@ -7,13 +7,16 @@ const cron = require("node-cron");
 const Bot = require("./bot");
 const Routes = require("./routes/main");
 const connectDB = require("./db");
-
+const paymentRoutes = require("./routes/payment")
 const UserSession = require("./models/user");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
+
+app.use("/api/payment", paymentRoutes)
+
 app.use(express.json());
 
 let whatsappBot;

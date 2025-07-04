@@ -1290,116 +1290,12 @@ How many would you like to add to your cart?`;
     const checkoutMessage = `🏁 Ready to checkout!
 
 Please provide your delivery address:
-(Example: "123 Main Street, Victoria Island, Lagos")`;
+(Example: "Our Ladies Hostel, Yahoo Junction, Ifite, Awka.")`;
 
     await this.sendMessage(phoneNumber, checkoutMessage);
     userSession.currentStep = "checkout";
     await userSession.save();
   }
-
-  //   async handleCheckout(phoneNumber, userSession, messageText) {
-  //     const address = messageText.trim();
-
-  //     if (address.length < 10) {
-  //       await this.sendMessage(
-  //         phoneNumber,
-  //         "Please provide a more detailed delivery address (at least 10 characters)."
-  //       );
-  //       return;
-  //     }
-
-  //     try {
-  //       const orderNumber = "ORD" + Date.now();
-
-  //       const cartItems = await Promise.all(
-  //         userSession.cart.map(async (item) => {
-  //           const food = await FoodItem.findById(item.food);
-  //           if (!food) {
-  //             throw new Error(`Food item ${item.food} not found`);
-  //           }
-  //           return {
-  //             food: item.food,
-  //             quantity: item.quantity,
-  //             price: food.price,
-  //             name: food.name,
-  //             specialInstructions: item.specialInstructions || null,
-  //           };
-  //         })
-  //       );
-
-  //       const totalAmount = cartItems.reduce(
-  //         (sum, item) => sum + item.price * item.quantity,
-  //         0
-  //       );
-
-  //       const order = new Order({
-  //         orderNumber,
-  //         customerPhone: userSession.phoneNumber,
-  //         customerName: userSession.userName || "Customer",
-  //         items: cartItems.map((item) => ({
-  //           food: item.food,
-  //           quantity: item.quantity,
-  //           price: item.price,
-  //           specialInstructions: item.specialInstructions,
-  //         })),
-  //         totalAmount,
-  //         deliveryAddress: address,
-  //         restaurant: cartItems[0]
-  //           ? (await FoodItem.findById(cartItems[0].food)).restaurant
-  //           : null,
-  //       });
-
-  //       await order.save();
-
-  //       const orderItemsText = cartItems
-  //         .map((item) => {
-  //           const itemTotal = item.price * item.quantity;
-  //           let itemText = `• ${item.name} x${item.quantity} - ₦${itemTotal}`;
-
-  //           if (item.specialInstructions) {
-  //             itemText += `\n  (${item.specialInstructions})`;
-  //           }
-
-  //           return itemText;
-  //         })
-  //         .join("\n");
-
-  //       userSession.cart = [];
-  //       userSession.currentStep = "initial";
-  //       await userSession.save();
-
-  //       const confirmationMessage = `✅ *Order Confirmed!*
-
-  // 📋 *Order #:* ${orderNumber}
-
-  // 👋 *Customer:* ${userSession.userName || "Customer"}
-
-  // 🍽️ *Your Order:*
-  // ${orderItemsText}
-
-  // 💰 *Subtotal:* ₦${totalAmount}
-  // 🚚 *Delivery Fee:* ₦0 (Free delivery)
-  // 💳 *Total Amount:* ₦${totalAmount}
-
-  // 📍 *Delivery Address:*
-  // ${address}
-
-  // ⏱️ *Estimated Delivery:* 45-60 minutes
-  // 💵 *Payment:* Cash or Transfer on delivery
-
-  // You'll receive updates on your order status from our team.
-
-  // Thank you for your order, ${userSession.userName || ""}! 🙏`;
-
-  //       await this.sendMessage(phoneNumber, confirmationMessage);
-  //     } catch (error) {
-  //       console.error("Error during checkout:", error);
-  //       await this.sendMessage(
-  //         phoneNumber,
-  //         "Sorry, there was an error processing your order. Please try again or contact support."
-  //       );
-  //     }
-  //   }
 
   async handleCheckout(phoneNumber, userSession, messageText) {
     const address = messageText.trim();
@@ -1459,10 +1355,8 @@ Please provide your delivery address:
         customerPhone: userSession.phoneNumber,
         customerName: userSession.userName || "Customer",
         totalAmount,
-        customerEmail: userSession.email || "customer@quicksmag.com",
+        customerEmail: userSession.email || "info@quicksmag.com",
       });
-
-      console.log("Paystack Payment Response:", paymentResponse);
 
       if (paymentResponse.status === true) {
         pendingPayment.paymentUrl = paymentResponse.data.authorization_url;
@@ -1530,14 +1424,11 @@ After making payment, return here and type "confirm payment" to complete your or
   }
 
   async handlePaymentConfirmation(phoneNumber, userSession) {
-    console.log("user session", userSession)
     if (!userSession.pendingPaymentReference) {
-      console.log("here 1")
       const recentOrder = await Order.findOne({
         customerPhone: phoneNumber,
         createdAt: { $gte: new Date(Date.now() - 30 * 60 * 1000) },
       }).sort({ createdAt: -1 });
- console.log("here 2")
       if (recentOrder && recentOrder.paymentStatus === "paid") {
         await this.sendMessage(
           phoneNumber,

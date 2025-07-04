@@ -50,6 +50,9 @@ const userSessionSchema = new mongoose.Schema(
     contactData: {
       type: mongoose.Schema.Types.Mixed,
     },
+    pendingPaymentReference: {
+      type: String
+    }
   },
   { timestamps: true }
 );

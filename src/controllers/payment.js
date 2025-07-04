@@ -15,8 +15,8 @@ class PaystackService {
         orderData.customerEmail ||
         `${orderData.customerPhone
           .replace("+", "")
-          .replace(/\D/g, "")}@foodorder.com`,
-      amount: Math.round(orderData.totalAmount * 100), // Convert to kobo
+          .replace(/\D/g, "")}@quicksmag.com`,
+      amount: Math.round(orderData.totalAmount * 100),
       reference: orderData.reference,
       currency: "NGN",
       callback_url: `${process.env.BASE_URL}/api/payment/paystack/callback`,
@@ -98,14 +98,9 @@ class PaystackService {
   }
 
   verifyWebhookSignature(payload, signature) {
-    const payloadString =
-      typeof payload === "string" ? payload : JSON.stringify(payload);
-
-    const hash = crypto
-      .createHmac("sha512", this.secretKey)
-      .update(payloadString)
-      .digest("hex");
-    return hash === signature;
+    const hmac = crypto.createHmac("sha512", this.secretKey);
+    const expectedSignature = hmac.update(payload).digest("hex");
+    return expectedSignature === signature;
   }
 
   async getAllTransactions(page = 1, perPage = 50) {

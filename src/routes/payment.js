@@ -12,21 +12,19 @@ router.post(
   async (req, res) => {
     const signature = req.headers["x-paystack-signature"];
     const payload = req.body;
-
     try {
       const paystackService = new PaystackService();
       const whatsappBot = new WhatsAppBot();
 
-      const payloadString = payload.toString();
+      const payloadString = payload.toString('utf8');
       const parsedPayload = JSON.parse(payloadString);
 
-      if (!paystackService.verifyWebhookSignature(parsedPayload, signature)) {
+      if (!paystackService.verifyWebhookSignature(payloadString, signature)) {
         console.error("Invalid webhook signature");
         return res.status(400).json({ error: "Invalid signature" });
       }
 
       const event = parsedPayload;
-      console.log("Paystack webhook received:", event.event);
 
       switch (event.event) {
         case "charge.success":
