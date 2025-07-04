@@ -98,9 +98,12 @@ class PaystackService {
   }
 
   verifyWebhookSignature(payload, signature) {
+    const payloadString =
+      typeof payload === "string" ? payload : JSON.stringify(payload);
+
     const hash = crypto
       .createHmac("sha512", this.secretKey)
-      .update(JSON.stringify(payload))
+      .update(payloadString)
       .digest("hex");
     return hash === signature;
   }

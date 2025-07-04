@@ -17,14 +17,15 @@ router.post(
       const paystackService = new PaystackService();
       const whatsappBot = new WhatsAppBot();
 
-      if (
-        !paystackService.verifyWebhookSignature(JSON.parse(payload), signature)
-      ) {
+      const payloadString = payload.toString();
+      const parsedPayload = JSON.parse(payloadString);
+
+      if (!paystackService.verifyWebhookSignature(parsedPayload, signature)) {
         console.error("Invalid webhook signature");
         return res.status(400).json({ error: "Invalid signature" });
       }
 
-      const event = JSON.parse(payload);
+      const event = parsedPayload;
       console.log("Paystack webhook received:", event.event);
 
       switch (event.event) {
@@ -61,18 +62,29 @@ async function handleChargeSuccess(data, whatsappBot) {
   console.log(`Processing successful charge for reference: ${reference}`);
 
   try {
-    const pendingPayment = await PendingPayment.findOne({ reference });
+    const pendingPayment = await PendingPayment.findOneAndUpdate(
+      { reference, paymentStatus: "pending" },
+      { paymentStatus: "processing" },
+      { new: true }
+    );
 
     if (!pendingPayment) {
-      console.log(`No pending payment found for reference: ${reference}`);
+      console.log(
+        `No pending payment found for reference: ${reference} or already processed`
+      );
       return;
     }
 
     const existingOrder = await Order.findOne({ paymentReference: reference });
     if (existingOrder) {
       console.log(`Order already exists for reference: ${reference}`);
+      if (pendingPayment.paymentStatus !== "paid") {
+        pendingPayment.paymentStatus = "paid";
+        await pendingPayment.save();
+      }
       return;
     }
+
     const order = new Order({
       orderNumber: pendingPayment.orderNumber,
       customerPhone: pendingPayment.customerPhone,
@@ -135,9 +147,16 @@ Thank you for your order, ${order.customerName}! 🙏`;
     console.log(`Order created successfully for reference: ${reference}`);
   } catch (error) {
     console.error("Error handling charge success:", error);
+    try {
+      await PendingPayment.findOneAndUpdate(
+        { reference },
+        { paymentStatus: "pending" }
+      );
+    } catch (resetError) {
+      console.error("Error resetting payment status:", resetError);
+    }
   }
 }
-
 async function handleChargeFailed(data, whatsappBot) {
   const reference = data.reference;
   console.log(`Processing failed charge for reference: ${reference}`);

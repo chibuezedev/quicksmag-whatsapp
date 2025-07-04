@@ -1531,6 +1531,27 @@ After making payment, return here and type "confirm payment" to complete your or
 
   async handlePaymentConfirmation(phoneNumber, userSession) {
     if (!userSession.pendingPaymentReference) {
+      const recentOrder = await Order.findOne({
+        customerPhone: phoneNumber,
+        createdAt: { $gte: new Date(Date.now() - 30 * 60 * 1000) },
+      }).sort({ createdAt: -1 });
+
+      if (recentOrder && recentOrder.paymentStatus === "paid") {
+        await this.sendMessage(
+          phoneNumber,
+          `✅ Your recent order has already been confirmed!
+        
+📋 *Order #:* ${recentOrder.orderNumber}
+⏱️ *Status:* ${recentOrder.status}
+
+Your order is being processed. Thank you for your patience!`
+        );
+
+        userSession.currentStep = "initial";
+        await userSession.save();
+        return;
+      }
+
       await this.sendMessage(
         phoneNumber,
         "No pending payment found. Please place a new order."
@@ -1570,7 +1591,7 @@ After making payment, return here and type "confirm payment" to complete your or
           await this.sendMessage(
             phoneNumber,
             `✅ Your order has already been confirmed!
-            
+          
 📋 *Order #:* ${existingOrder.orderNumber}
 ⏱️ *Status:* ${existingOrder.status}
 
@@ -1600,6 +1621,13 @@ Your order is being processed. Thank you for your patience!`
           paymentReference: userSession.pendingPaymentReference,
           status: "confirmed",
           paymentStatus: "paid",
+          paymentDetails: {
+            transactionId: paymentStatus.data.id,
+            channel: paymentStatus.data.channel,
+            brand: paymentStatus.data.authorization?.brand,
+            last4: paymentStatus.data.authorization?.last4,
+            authorization: paymentStatus.data.authorization,
+          },
         });
 
         await order.save();
@@ -1637,9 +1665,6 @@ You can track your order status by typing "track order" anytime.`;
         userSession.currentStep = "initial";
         userSession.pendingPaymentReference = null;
         await userSession.save();
-
-        // Optional: Send notification to restaurant
-        // await this.notifyRestaurant(order);
       } else if (paymentStatus.data.status === "failed") {
         await this.sendMessage(
           phoneNumber,
