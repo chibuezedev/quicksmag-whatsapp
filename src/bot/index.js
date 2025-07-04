@@ -1530,12 +1530,14 @@ After making payment, return here and type "confirm payment" to complete your or
   }
 
   async handlePaymentConfirmation(phoneNumber, userSession) {
+    console.log("user session", userSession)
     if (!userSession.pendingPaymentReference) {
+      console.log("here 1")
       const recentOrder = await Order.findOne({
         customerPhone: phoneNumber,
         createdAt: { $gte: new Date(Date.now() - 30 * 60 * 1000) },
       }).sort({ createdAt: -1 });
-
+ console.log("here 2")
       if (recentOrder && recentOrder.paymentStatus === "paid") {
         await this.sendMessage(
           phoneNumber,
